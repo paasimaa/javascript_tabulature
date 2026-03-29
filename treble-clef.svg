@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 240">
+  <!--
+    Coordinate reference (for easy editing):
+      Staff lines at y = 50, 80, 110, 140, 170  (30 px per space)
+      G line (2nd from bottom) = y = 140
+      Clef spans y ≈ 5 .. 215
+  -->
+
+  <!-- Interior fill for G loop — masks staff lines behind it -->
+  <circle cx="30" cy="140" r="19" fill="#fafaf8" stroke="none"/>
+
+  <!-- Main flowing stroke -->
+  <path
+    fill="none"
+    stroke="#111111"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    d="M 38 6
+       C 80 10, 84 56, 46 80
+       C 16 98, 6 122, 8 144
+       C 10 164, 24 180, 36 184
+       C 52 190, 54 212, 36 214
+       C 20 216, 12 200, 20 192"
+  />
+
+  <!-- G loop circle — encircles the G line -->
+  <circle
+    cx="30" cy="140" r="24"
+    fill="none"
+    stroke="#111111"
+    stroke-width="5"
+  />
+</svg>

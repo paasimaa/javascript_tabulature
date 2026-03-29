@@ -145,6 +145,17 @@ button#btn-copy:hover {
   color: #ffa060;
 }
 
+button#btn-pdf {
+  color: #80c0f0;
+  border-color: #102a3a;
+}
+
+button#btn-pdf:hover {
+  background: #0a1a28;
+  border-color: #4090c0;
+  color: #a0d8ff;
+}
+
 .ctrl-label {
   color: var(--text-dim);
   font-size: 12px;
@@ -221,6 +232,85 @@ button#btn-copy:hover {
   font-size: 12px;
 }
 
+#sheet-title-area {
+  display: none;
+  position: relative;
+  background: #fafaf8;
+  padding: 18px 32px 4px;
+  border-bottom: 1px solid #e8e4de;
+}
+
+#sheet-title-area.visible {
+  display: block;
+}
+
+#sheet-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 26px;
+  font-weight: bold;
+  color: #111;
+  text-align: center;
+  outline: none;
+  min-height: 1.3em;
+  width: 100%;
+}
+
+#sheet-title:empty::before {
+  content: attr(data-placeholder);
+  color: #bbb;
+  font-weight: normal;
+  font-style: italic;
+}
+
+#sheet-subtitle {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
+  font-weight: normal;
+  font-style: italic;
+  color: #444;
+  text-align: center;
+  outline: none;
+  min-height: 1.3em;
+  width: 100%;
+  display: none;
+  margin-top: 4px;
+}
+
+#sheet-subtitle.visible {
+  display: block;
+}
+
+#sheet-subtitle:empty::before {
+  content: attr(data-placeholder);
+  color: #bbb;
+  font-style: italic;
+}
+
+#sheet-sidetitle {
+  position: absolute;
+  right: 32px;
+  bottom: 10px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 12px;
+  font-style: italic;
+  color: #555;
+  text-align: right;
+  outline: none;
+  min-width: 120px;
+  max-width: 260px;
+  display: none;
+}
+
+#sheet-sidetitle.visible {
+  display: block;
+}
+
+#sheet-sidetitle:empty::before {
+  content: attr(data-placeholder);
+  color: #bbb;
+  font-style: italic;
+}
+
 .tab-canvas-wrap {
   background: #fafaf8;
   overflow-x: auto;
@@ -281,6 +371,16 @@ button#btn-bend.bend-full {
 button#btn-bend.bend-half:hover,
 button#btn-bend.bend-full:hover {
   background: rgba(220, 180, 40, 0.22);
+}
+
+button#btn-auto-advance.auto-advance-active {
+  background: rgba(255, 200, 40, 0.12);
+  border-color: #c8a820;
+  color: #f0c840;
+}
+
+button#btn-auto-advance.auto-advance-active:hover {
+  background: rgba(255, 200, 40, 0.22);
 }
 
 button#btn-tech.tech-hammer,
@@ -348,4 +448,64 @@ button#btn-stop:hover:not(:disabled) {
   }
 
   .tab-hint { display: none; }
+}
+
+/* ── Print / PDF export ───────────────────────────────────────────────────── */
+
+@media print {
+  @page {
+    margin: 12mm 14mm;
+    size: A4 landscape;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 12px;
+  }
+
+  /* Hide everything except the tab canvas */
+  header,
+  .fretboard-wrap,
+  .controls,
+  .tab-header {
+    display: none !important;
+  }
+
+  #sheet-title-area.visible {
+    display: block !important;
+    border-bottom: none;
+    padding-bottom: 12px;
+  }
+
+  #sheet-subtitle.visible {
+    display: block !important;
+  }
+
+  #sheet-sidetitle.visible {
+    display: block !important;
+  }
+
+  #app {
+    max-width: 100%;
+    padding: 0;
+    gap: 0;
+  }
+
+  .tab-section {
+    border: none;
+    background: transparent;
+  }
+
+  .tab-canvas-wrap {
+    background: #fff;
+    overflow: visible;
+    min-height: 0;
+  }
+
+  #tab-canvas {
+    width: 100% !important;
+    height: auto !important;
+    page-break-inside: avoid;
+  }
 }

@@ -51,6 +51,7 @@ const state = {
   vibMode:     false,                 // vibrato squiggle above note
   eightvaMode:  false,                // 8va — play notes one octave higher
   tripletMode:  false,                // group notes in triplets
+  autoAdvance:  false,                // auto-add new column after each note placed
 
 };
 
@@ -316,21 +317,26 @@ function tabText() {
 
 // Layout constants (logical px, before DPR scaling)
 const TL = {
-  lineH:      18,   // gap between tab staff lines
-  padV:       52,   // vertical padding above/below each system
-  padH:       30,   // horizontal margin left & right
-  clefW:      54,   // width of clef area (shared by both staves)
-  lead:       12,   // space after opening barline
-  trail:      12,   // space before closing barline
-  colW1:      30,   // column width for 1-digit frets
-  colW2:      42,   // column width for 2-digit frets
+  lineH:      14,   // gap between tab staff lines
+  padV:       42,   // vertical padding above/below each system
+  padH:       24,   // horizontal margin left & right
+  clefW:      44,   // width of clef area (shared by both staves)
+  lead:       10,   // space after opening barline
+  trail:      10,   // space before closing barline
+  colW1:      24,   // column width for 1-digit frets
+  colW2:      34,   // column width for 2-digit frets
   // Music staff
-  musicLineH: 12,   // gap between music staff lines (4 gaps = 5 lines)
-  staveGap:   90,   // gap between bottom of music staff and top of tab staff
+  musicLineH: 10,   // gap between music staff lines (4 gaps = 5 lines)
+  staveGap:   72,   // gap between bottom of music staff and top of tab staff
                     // must be large enough for ledger lines of low notes
 };
 
 const PAPER  = '#fafaf8';
+
+// Preload treble clef image; re-render tab once it's ready
+const trebleClefImg = new Image();
+trebleClefImg.onload = () => renderTab();
+trebleClefImg.src = 'treble-clef.svg';
 const INK    = '#111111';
 const INK_DIM = '#aaaaaa';
 const CUR_BG  = 'rgba(210, 80, 20, 0.06)';
@@ -1426,43 +1432,17 @@ function renderTab() {
 // 4 = bottom staff line (E4).  Clef spans roughly y ∈ [−1.5, 5.2].
 //
 function drawTrebleClef(cx, left, staffTop, staffH) {
-  const lineH = staffH / 4;
+  if (!trebleClefImg.complete || !trebleClefImg.naturalWidth) return;
 
-  cx.save();
-  cx.translate(left + lineH * 0.18, staffTop);
-  cx.scale(lineH, lineH);
+  // SVG reference: staff spans y=50..170 (height=120) inside a 80×240 viewBox.
+  // Scale so that the SVG staff height matches the canvas staff height.
+  const scale  = staffH / 120;
+  const drawW  = 80  * scale;
+  const drawH  = 240 * scale;
+  const drawX  = left;
+  const drawY  = staffTop - 50 * scale;   // y=50 in SVG = top staff line on canvas
 
-  cx.strokeStyle = INK;
-  cx.lineCap     = 'round';
-  cx.lineJoin    = 'round';
-
-  // ── Main stroke: from top curl sweeping down to lower tail ──────
-  cx.lineWidth = 0.155;
-  cx.beginPath();
-  // Upper curl (above staff)
-  cx.moveTo(0.55, -1.3);
-  cx.bezierCurveTo(1.35, -1.0,  1.45,  0.3,  0.7,  0.9);
-  // Curve through staff body down to bottom area
-  cx.bezierCurveTo(-0.1,  1.5, -0.5,  2.4, -0.55,  3.1);
-  cx.bezierCurveTo(-0.55,  3.9, -0.1,  4.4,  0.55,  4.65);
-  // Lower tail with bottom curl
-  cx.bezierCurveTo( 1.3,  4.9,  1.35,  5.6,  0.55,  5.55);
-  cx.bezierCurveTo(-0.3,  5.5, -0.55,  4.7,  0.0,   4.3);
-  cx.stroke();
-
-  // ── G-loop: circle centred on the G line (y = 3, 2nd from bottom) ──
-  cx.lineWidth = 0.13;
-  cx.beginPath();
-  cx.arc(0.55, 3.05, 0.82, 0, Math.PI * 2);
-  cx.stroke();
-
-  // ── Mask the interior of the loop so the staff line is hidden ──────
-  cx.fillStyle = PAPER;
-  cx.beginPath();
-  cx.arc(0.55, 3.05, 0.62, 0, Math.PI * 2);
-  cx.fill();
-
-  cx.restore();
+  cx.drawImage(trebleClefImg, drawX, drawY, drawW, drawH);
 }
 
 // ─── UI Updates ───────────────────────────────────────────────────────────────
@@ -1488,6 +1468,10 @@ function syncEightvaUI() {
 
 function syncTripletUI() {
   document.getElementById('btn-triplet').classList.toggle('triplet-active', state.tripletMode);
+}
+
+function syncAutoAdvanceUI() {
+  document.getElementById('btn-auto-advance').classList.toggle('auto-advance-active', state.autoAdvance);
 }
 
 function syncBendUI() {
@@ -1518,6 +1502,7 @@ function refresh() {
   syncVibUI();
   syncEightvaUI();
   syncTripletUI();
+  syncAutoAdvanceUI();
 
   document.getElementById('col-num').textContent   = state.currentCol + 1;
   document.getElementById('col-total').textContent = state.columns.length;
@@ -1566,6 +1551,11 @@ function toggleEightva() {
 
 function toggleTriplet() {
   state.tripletMode = !state.tripletMode;
+  refresh();
+}
+
+function toggleAutoAdvance() {
+  state.autoAdvance = !state.autoAdvance;
   refresh();
 }
 
@@ -1653,12 +1643,13 @@ canvas.addEventListener('click', e => {
     delete col[hit.string];   // toggle off
   } else {
     col[hit.string] = hit.fret;
-    if (state.techMode)  col._tech  = state.techMode;
-    if (state.slideMode) col._slide = true;
-    if (state.bendMode)  col._bend  = state.bendMode;
-    if (state.vibMode)    col._vib    = true;
-    if (state.eightvaMode)  col._8va     = true;
-    if (state.tripletMode)  col._triplet = true;
+    if (state.techMode)    col._tech    = state.techMode;
+    if (state.slideMode)   col._slide   = true;
+    if (state.bendMode)    col._bend    = state.bendMode;
+    if (state.vibMode)     col._vib     = true;
+    if (state.eightvaMode) col._8va     = true;
+    if (state.tripletMode) col._triplet = true;
+    if (state.autoAdvance) addColumn();  // auto-advance: insert and move to next column
   }
   refresh();
 });
@@ -1689,6 +1680,7 @@ document.getElementById('btn-bend').addEventListener('click', cycleBend);
 document.getElementById('btn-vib').addEventListener('click', toggleVib);
 document.getElementById('btn-8va').addEventListener('click', toggleEightva);
 document.getElementById('btn-triplet').addEventListener('click', toggleTriplet);
+document.getElementById('btn-auto-advance').addEventListener('click', toggleAutoAdvance);
 document.getElementById('btn-del').addEventListener('click', deleteColumn);
 document.getElementById('btn-clear-col').addEventListener('click', clearColumn);
 document.getElementById('btn-clear-all').addEventListener('click', clearAll);
@@ -1705,9 +1697,53 @@ document.getElementById('btn-copy').addEventListener('click', async () => {
   }
 });
 
+function focusAtEnd(el) {
+  el.focus();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+document.getElementById('btn-title').addEventListener('click', () => {
+  const area = document.getElementById('sheet-title-area');
+  const el   = document.getElementById('sheet-title');
+  // Show the area if it isn't visible yet
+  area.classList.add('visible');
+  focusAtEnd(el);
+});
+
+document.getElementById('btn-subtitle').addEventListener('click', () => {
+  const area = document.getElementById('sheet-title-area');
+  const el   = document.getElementById('sheet-subtitle');
+  area.classList.add('visible');
+  const isVisible = el.classList.toggle('visible');
+  if (isVisible) focusAtEnd(el);
+});
+
+document.getElementById('btn-sidetitle').addEventListener('click', () => {
+  const area = document.getElementById('sheet-title-area');
+  const el   = document.getElementById('sheet-sidetitle');
+  area.classList.add('visible');
+  const isVisible = el.classList.toggle('visible');
+  if (isVisible) focusAtEnd(el);
+});
+
+document.getElementById('btn-pdf').addEventListener('click', () => {
+  const titleEl  = document.getElementById('sheet-title');
+  const titleText = titleEl.innerText.trim();
+  const prev = document.title;
+  if (titleText) document.title = titleText;
+  window.print();
+  document.title = prev;
+});
+
 document.addEventListener('keydown', e => {
-  // Don't interfere with inputs
+  // Don't interfere with inputs or contenteditable elements
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+  if (e.target.isContentEditable) return;
 
   switch (e.key) {
     case 'ArrowLeft':  e.preventDefault(); goPrev();       break;

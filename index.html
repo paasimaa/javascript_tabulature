@@ -41,6 +41,7 @@
         <button id="btn-vib" title="Toggle vibrato">Vibrato</button>
         <button id="btn-8va" title="Toggle 8va — play one octave higher">8va</button>
         <button id="btn-triplet" title="Toggle triplet mode">Triplet</button>
+        <button id="btn-auto-advance" title="Auto-advance: add new column after each note">&#8594; Auto</button>
       </div>
 
       <div class="ctrl-group play">
@@ -52,6 +53,10 @@
 
       <div class="ctrl-group export">
         <button id="btn-copy" title="Copy tab to clipboard">&#9113; Copy Tab</button>
+        <button id="btn-title" title="Add/edit title shown on the sheet">&#9998; Title</button>
+        <button id="btn-subtitle" title="Add/edit subtitle shown on the sheet">&#9998; Subtitle</button>
+        <button id="btn-sidetitle" title="Add/edit side note shown top-right of the sheet">&#9998; Side note</button>
+        <button id="btn-pdf" title="Export to PDF">&#128438; Export PDF</button>
       </div>
 
       <div class="ctrl-group dur">
@@ -89,6 +94,20 @@
         <span class="tab-hint">
           Click fretboard &rarr; place note &nbsp;|&nbsp; Enter &rarr; new column &nbsp;|&nbsp; &#8592;&#8594; &rarr; navigate
         </span>
+      </div>
+      <div id="sheet-title-area">
+        <div id="sheet-title"
+             contenteditable="true"
+             spellcheck="false"
+             data-placeholder="Song title..."></div>
+        <div id="sheet-subtitle"
+             contenteditable="true"
+             spellcheck="false"
+             data-placeholder="Subtitle / artist / tuning..."></div>
+        <div id="sheet-sidetitle"
+             contenteditable="true"
+             spellcheck="false"
+             data-placeholder="e.g. Arranged by..."></div>
       </div>
       <div class="tab-canvas-wrap">
         <canvas id="tab-canvas"></canvas>
