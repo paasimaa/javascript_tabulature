@@ -3,10 +3,10 @@
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STRINGS = ['e', 'B', 'G', 'D', 'A', 'E'];  // top → bottom (high → low)
-const FRET_COUNT   = 15;
+const FRET_COUNT   = 24;
 const STRING_COUNT = 6;
-const SINGLE_DOTS  = [3, 5, 7, 9, 15];
-const DOUBLE_DOTS  = [12];
+const SINGLE_DOTS  = [3, 5, 7, 9, 15, 17, 19, 21];
+const DOUBLE_DOTS  = [12, 24];
 
 // Canvas layout
 const LEFT   = 52;   // px — string label area
@@ -26,14 +26,14 @@ const STRING_COLORS = [
 const COL = {
   woodBg:     '#1c0e00',
   woodEdge:   '#2a1500',
-  fretMetal:  '#5a4a36',
+  fretMetal:  '#a08060',
   nut:        '#ddd0a0',
-  dot:        '#2e1e0e',
+  dot:        '#c8a060',
   hover:      'rgba(255, 220, 80, 0.10)',
   noteActive: '#e06030',
   noteGlow:   'rgba(220, 90, 40, 0.28)',
   noteText:   '#ffffff',
-  fretLabel:  '#504030',
+  fretLabel:  '#a08060',
   strLabel:   '#888',
 };
 
@@ -48,6 +48,10 @@ const state = {
   techMode:    null,                  // null | 'hammer' | 'pull'
   slideMode:   false,                 // straight-line slide between notes
   bendMode:    null,                  // null | '1/2' | 'full'
+  vibMode:     false,                 // vibrato squiggle above note
+  eightvaMode:  false,                // 8va — play notes one octave higher
+  tripletMode:  false,                // group notes in triplets
+
 };
 
 // ─── Canvas & Layout ──────────────────────────────────────────────────────────
@@ -56,12 +60,18 @@ const canvas = document.getElementById('fretboard');
 const ctx    = canvas.getContext('2d');
 
 // Computed layout — set once via initLayout()
-let FRET_W  = 0;
+let FRET_POSITIONS = [];  // FRET_POSITIONS[n] = px offset from nut to right edge of fret n
 let STR_GAP = 0;
+let pickHitTargets = []; // populated each renderTab(); used by tab-canvas click handler
 
 function initLayout() {
-  FRET_W  = (canvas.width  - LEFT - OPEN_W - NUT_W - RIGHT) / FRET_COUNT;
-  STR_GAP = (canvas.height - TOP  - BOTTOM) / (STRING_COUNT - 1);
+  const totalW  = canvas.width - LEFT - OPEN_W - NUT_W - RIGHT;
+  const endFrac = 1 - Math.pow(0.5, FRET_COUNT / 12); // ≈ 0.75 for 24 frets
+  FRET_POSITIONS = [];
+  for (let i = 0; i <= FRET_COUNT; i++) {
+    FRET_POSITIONS.push(totalW * (1 - Math.pow(0.5, i / 12)) / endFrac);
+  }
+  STR_GAP = (canvas.height - TOP - BOTTOM) / (STRING_COUNT - 1);
 }
 
 // ─── Coordinate Helpers ───────────────────────────────────────────────────────
@@ -73,18 +83,19 @@ function stringY(s) {
 /** X-centre of a fret's cell (0 = open zone). */
 function fretCenterX(fret) {
   if (fret === 0) return LEFT + OPEN_W / 2;
-  return LEFT + OPEN_W + NUT_W + (fret - 0.5) * FRET_W;
+  return LEFT + OPEN_W + NUT_W + (FRET_POSITIONS[fret - 1] + FRET_POSITIONS[fret]) / 2;
 }
 
 /** Left edge of a fret's clickable zone. */
 function fretLeftX(fret) {
   if (fret === 0) return LEFT;
-  return LEFT + OPEN_W + NUT_W + (fret - 1) * FRET_W;
+  return LEFT + OPEN_W + NUT_W + FRET_POSITIONS[fret - 1];
 }
 
 /** Width of a fret's clickable zone. */
 function fretZoneW(fret) {
-  return fret === 0 ? OPEN_W : FRET_W;
+  if (fret === 0) return OPEN_W;
+  return FRET_POSITIONS[fret] - FRET_POSITIONS[fret - 1];
 }
 
 /** Map a canvas position to { string, fret } or null. */
@@ -94,7 +105,8 @@ function hitTest(x, y) {
   if (x >= LEFT && x < LEFT + OPEN_W) {
     fret = 0;
   } else if (x >= LEFT + OPEN_W + NUT_W) {
-    fret = Math.floor((x - LEFT - OPEN_W - NUT_W) / FRET_W) + 1;
+    const px = x - LEFT - OPEN_W - NUT_W;
+    fret = FRET_POSITIONS.findIndex(pos => pos >= px);
     if (fret < 1 || fret > FRET_COUNT) return null;
   } else {
     return null; // on the nut itself
@@ -190,7 +202,7 @@ function drawFretLines(H) {
   ctx.lineWidth   = 1.5;
 
   for (let f = 1; f <= FRET_COUNT; f++) {
-    const x = Math.round(LEFT + OPEN_W + NUT_W + f * FRET_W) + 0.5;
+    const x = Math.round(LEFT + OPEN_W + NUT_W + FRET_POSITIONS[f]) + 0.5;
     ctx.beginPath();
     ctx.moveTo(x, TOP - 6);
     ctx.lineTo(x, H - BOTTOM + 4);
@@ -226,7 +238,9 @@ function drawFretNumbers() {
   ctx.fillText('0', fretCenterX(0), TOP - 17);
 
   for (let f = 1; f <= FRET_COUNT; f++) {
-    ctx.fillText(f, fretCenterX(f), TOP - 17);
+    if (fretZoneW(f) >= 12) {
+      ctx.fillText(f, fretCenterX(f), TOP - 17);
+    }
   }
 }
 
@@ -303,7 +317,7 @@ function tabText() {
 // Layout constants (logical px, before DPR scaling)
 const TL = {
   lineH:      18,   // gap between tab staff lines
-  padV:       28,   // vertical padding above/below each system
+  padV:       52,   // vertical padding above/below each system
   padH:       30,   // horizontal margin left & right
   clefW:      54,   // width of clef area (shared by both staves)
   lead:       12,   // space after opening barline
@@ -312,7 +326,7 @@ const TL = {
   colW2:      42,   // column width for 2-digit frets
   // Music staff
   musicLineH: 12,   // gap between music staff lines (4 gaps = 5 lines)
-  staveGap:   60,   // gap between bottom of music staff and top of tab staff
+  staveGap:   90,   // gap between bottom of music staff and top of tab staff
                     // must be large enough for ledger lines of low notes
 };
 
@@ -323,9 +337,11 @@ const CUR_BG  = 'rgba(210, 80, 20, 0.06)';
 const CUR_INK = '#c04010';
 
 function tabColW(col) {
-  if (col._break) return 0;
-  const maxD = Object.values(col).reduce((m, f) => Math.max(m, String(f).length), 0);
-  return maxD >= 2 ? TL.colW2 : TL.colW1;
+  if (col._break)   return 0;
+  if (col._barline) return 12;
+  const hasTwoDigit = Object.entries(col).some(([k, v]) => !k.startsWith('_') && String(v).length >= 2);
+  const base = hasTwoDigit ? TL.colW2 : TL.colW1;
+  return col._triplet ? Math.round(base * 0.75) : base;
 }
 
 // ─── Music Notation Helpers ───────────────────────────────────────────────────
@@ -495,16 +511,17 @@ function drawNoteHeads(cx, ncx, notes, botY, lineH, ink) {
 
 /** Draw a single note column (with flags for isolated 16th notes). */
 function drawMusicNotes(cx, col, noteCx, botY, lineH, isCurrent) {
-  const semi  = bendSemitones(col._bend);
-  const notes = getColNotes(col, semi);
+  const octShift = col._8va ? -12 : 0;
+  const semi     = bendSemitones(col._bend) + octShift;
+  const notes    = getColNotes(col, semi);
   if (notes.length === 0) return;
 
   const ink = isCurrent ? CUR_INK : INK;
 
-  // Grace note at original pitch if bent
-  if (semi > 0) {
+  // Grace note at original pitch (with octave shift if 8va) if bent
+  if (col._bend) {
     const graceOff = lineH * 1.1;
-    drawGraceNote(cx, noteCx - graceOff, getColNotes(col), botY, lineH, ink);
+    drawGraceNote(cx, noteCx - graceOff, getColNotes(col, octShift), botY, lineH, ink);
   }
   const nhW      = lineH * 1.1;
   const avgStep  = notes.reduce((a, n) => a + n.step, 0) / notes.length;
@@ -538,15 +555,18 @@ function drawMusicNotes(cx, col, noteCx, botY, lineH, isCurrent) {
  * beamCount: 1 for 8th notes, 2 for 16th notes.
  * items = [{ col, ncx, isCur }]
  */
-function drawBeamedGroup(cx, items, botY, lineH, beamCount) {
+function drawBeamedGroup(cx, items, botY, lineH, beamCount, isTriplet = false) {
   const nhW = lineH * 1.1;
 
-  // Attach note arrays (use bent pitch for stem/beam geometry if bent)
-  const cols = items.map(item => ({
-    ...item,
-    notes:      getColNotes(item.col, bendSemitones(item.col._bend)),
-    origNotes:  getColNotes(item.col),
-  }));
+  // Attach note arrays (use bent + octave-shifted pitch for stem/beam geometry)
+  const cols = items.map(item => {
+    const octShift = item.col._8va ? -12 : 0;
+    return {
+      ...item,
+      notes:     getColNotes(item.col, bendSemitones(item.col._bend) + octShift),
+      origNotes: getColNotes(item.col, octShift),
+    };
+  });
 
   // Group-wide stem direction from all notes combined
   const allSteps = cols.flatMap(c => c.notes.map(n => n.step));
@@ -595,10 +615,20 @@ function drawBeamedGroup(cx, items, botY, lineH, beamCount) {
   cx.fillRect(x0 - 0.5, b1Top, x1 - x0 + 1, beamH);
   if (beamCount >= 2) cx.fillRect(x0 - 0.5, b2Top, x1 - x0 + 1, beamH);
 
+  // Triplet number near the beam
+  if (isTriplet) {
+    const midX  = (enriched[0].stemX + enriched[enriched.length - 1].stemX) / 2;
+    const markY = stemUp ? b1Top - 4 : beamY + 4;
+    cx.font         = `bold 10px Georgia, serif`;
+    cx.fillStyle    = INK;
+    cx.textAlign    = 'center';
+    cx.textBaseline = stemUp ? 'bottom' : 'top';
+    cx.fillText('3', midX, markY);
+  }
+
   // Note heads per column (grace note before main note if bent)
   enriched.forEach(e => {
-    const semi = bendSemitones(e.col._bend);
-    if (semi > 0) {
+    if (e.col._bend) {
       const graceOff = lineH * 1.1;
       drawGraceNote(cx, e.ncx - graceOff, e.origNotes, botY, lineH, e.isCur ? CUR_INK : INK);
     }
@@ -697,6 +727,35 @@ function drawRest(cx, x, staffBotY, lineH, dur, ink) {
 }
 
 /**
+ * Draw a triplet bracket [ 3 ] above a run of quarter-note triplet columns.
+ */
+function drawTripletBracket(cx, run, botY, lineH) {
+  const x0    = run[0].ncx;
+  const x1    = run[run.length - 1].ncx;
+  const midX  = (x0 + x1) / 2;
+  const bY    = botY - lineH * 5.6;   // safely above stem tips for mid-range notes
+  const legH  = 5;
+
+  cx.strokeStyle = INK;
+  cx.lineWidth   = 0.9;
+  cx.lineCap     = 'round';
+  cx.beginPath();
+  cx.moveTo(x0 - 4, bY + legH);
+  cx.lineTo(x0 - 4, bY);
+  cx.lineTo(midX - 7, bY);
+  cx.moveTo(midX + 7, bY);
+  cx.lineTo(x1 + 4, bY);
+  cx.lineTo(x1 + 4, bY + legH);
+  cx.stroke();
+
+  cx.font         = `bold 10px Georgia, serif`;
+  cx.fillStyle    = INK;
+  cx.textAlign    = 'center';
+  cx.textBaseline = 'bottom';
+  cx.fillText('3', midX, bY + 1);
+}
+
+/**
  * Render all music-staff notes for one system.
  * Detects consecutive 16th-note runs and routes them to drawBeamedGroup;
  * everything else goes to drawMusicNotes.
@@ -720,8 +779,8 @@ function renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw) {
   while (i < colData.length) {
     const item     = colData[i];
 
-    // ── Group-break column (invisible, only breaks beam grouping) ───
-    if (item.col._break) { i++; continue; }
+    // ── Group-break / barline column (breaks beam grouping) ─────────
+    if (item.col._break || item.col._barline) { i++; continue; }
 
     // ── Rest column ─────────────────────────────────────────────────
     if (item.col._rest) {
@@ -733,16 +792,43 @@ function renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw) {
     const hasNotes = getColNotes(item.col).length > 0;
 
     if ((item.dur === 'eighth' || item.dur === 'sixteenth') && hasNotes) {
-      const groupDur = item.dur;
-      const beams    = groupDur === 'sixteenth' ? 2 : 1;
-      const start    = i;
-      while (i < colData.length && colData[i].dur === groupDur && !colData[i].col._break && !colData[i].col._rest && getColNotes(colData[i].col).length > 0) i++;
+      const groupDur  = item.dur;
+      const beams     = groupDur === 'sixteenth' ? 2 : 1;
+      const isTriplet = !!item.col._triplet;
+      const start     = i;
+      while (i < colData.length &&
+             colData[i].dur === groupDur &&
+             !!colData[i].col._triplet === isTriplet &&
+             !colData[i].col._break && !colData[i].col._barline && !colData[i].col._rest &&
+             getColNotes(colData[i].col).length > 0) i++;
       const run = colData.slice(start, i);
       if (run.length >= 2) {
-        drawBeamedGroup(cx, run, botY, lineH, beams);
+        drawBeamedGroup(cx, run, botY, lineH, beams, isTriplet);
       } else {
         drawMusicNotes(cx, run[0].col, run[0].ncx, botY, lineH, run[0].isCur);
+        if (isTriplet) {
+          // Isolated triplet — just draw the "3" above the note
+          const notes = getColNotes(run[0].col, run[0].col._8va ? -12 : 0);
+          if (notes.length > 0) {
+            const topStep = Math.max(...notes.map(n => n.step));
+            const tipY    = stepY(topStep, botY, lineH) - lineH * 3.5 - 4;
+            cx.font = `bold 10px Georgia, serif`;
+            cx.fillStyle = INK; cx.textAlign = 'center'; cx.textBaseline = 'bottom';
+            cx.fillText('3', run[0].ncx, tipY);
+          }
+        }
       }
+    } else if (item.dur === 'quarter' && hasNotes && item.col._triplet) {
+      // Quarter-note triplet run — collect and draw bracket
+      const start = i;
+      while (i < colData.length &&
+             colData[i].dur === 'quarter' &&
+             colData[i].col._triplet &&
+             !colData[i].col._break && !colData[i].col._barline && !colData[i].col._rest &&
+             getColNotes(colData[i].col).length > 0) i++;
+      const run = colData.slice(start, i);
+      run.forEach(r => drawMusicNotes(cx, r.col, r.ncx, botY, lineH, r.isCur));
+      drawTripletBracket(cx, run, botY, lineH);
     } else {
       if (hasNotes) drawMusicNotes(cx, item.col, item.ncx, botY, lineH, item.isCur);
       i++;
@@ -867,6 +953,35 @@ function drawSlide(cx, x0, y0, x1, y1, edgeOff0, edgeOff1, ink) {
   cx.fillText('s', midX, midY - 1);
 }
 
+// ── Vibrato squiggle ─────────────────────────────────────────────────────────
+
+/**
+ * Draw a wavy vibrato line centred at (x, y).
+ * 4 full wave cycles rendered as alternating quadratic bezier arcs.
+ */
+function drawVibrato(cx, x, y, ink) {
+  const halfW  = 4;      // width of each half-cycle
+  const amp    = 2.8;    // wave amplitude
+  const halves = 8;      // 4 full cycles = 8 half-cycles
+  const totalW = halves * halfW;
+  const startX = x - totalW / 2;
+
+  cx.strokeStyle = ink;
+  cx.lineWidth   = 1.1;
+  cx.lineCap     = 'round';
+  cx.beginPath();
+  cx.moveTo(startX, y);
+
+  for (let i = 0; i < halves; i++) {
+    const x0    = startX + i * halfW;
+    const x1    = x0 + halfW;
+    const ctrlY = y + (i % 2 === 0 ? -amp : amp);
+    cx.quadraticCurveTo((x0 + x1) / 2, ctrlY, x1, y);
+  }
+
+  cx.stroke();
+}
+
 // ── Bend arrow ───────────────────────────────────────────────────────────────
 
 /**
@@ -913,6 +1028,7 @@ function renderTab() {
   const tc          = document.getElementById('tab-canvas');
   const wrap        = tc.parentElement;
   const dpr         = window.devicePixelRatio || 1;
+  pickHitTargets    = [];
   const tabStaffH   = TL.lineH * 5;                                    // 90px
   const musicStaffH = TL.musicLineH * 4;                               // 32px
   const sysH        = TL.padV + musicStaffH + TL.staveGap + tabStaffH + TL.padV;
@@ -951,6 +1067,25 @@ function renderTab() {
 
   cx.fillStyle = PAPER;
   cx.fillRect(0, 0, logW, logH);
+
+  // Build auto-alternating pick map: every pickable note (no H/P, no slide, has at least one fret)
+  // gets alternating down/up unless the user has explicitly set _pick.
+  const autoPick = {};
+  let pickSeq = 0; // even = down, odd = up
+  state.columns.forEach((col, ci) => {
+    if (col._barline || col._break) return;
+    const hasNote = Object.keys(col).some(k => !k.startsWith('_'));
+    if (!hasNote) return;                          // rest — no symbol
+    if (col._tech || col._slide) return;           // H/P or slide — no auto symbol
+    if (col._pick === 'down' || col._pick === 'up') {
+      // User-set pick: sync sequence so the next note gets the opposite direction
+      pickSeq = col._pick === 'down' ? 1 : 0;
+    } else {
+      // Auto or explicitly suppressed ('none') — assign and advance
+      autoPick[ci] = pickSeq % 2 === 0 ? 'down' : 'up';
+      pickSeq++;
+    }
+  });
 
   systems.forEach((sys, si) => {
     const sysTop    = si * sysH + TL.padV;
@@ -1092,14 +1227,33 @@ function renderTab() {
       noteX += cw[ci];
     });
 
+    // ── Bar lines ─────────────────────────────────────────────────
+    sys.indices.forEach(ci => {
+      if (!state.columns[ci]._barline) return;
+      const bx = Math.round(colCx[ci]) + 0.5;
+      cx.strokeStyle = INK;
+      cx.lineWidth   = 1;
+      cx.beginPath();
+      cx.moveTo(bx, musicTop);
+      cx.lineTo(bx, tabTop + tabStaffH);
+      cx.stroke();
+    });
+
     // ── Picking symbols ───────────────────────────────────────────
     sys.indices.forEach(ci => {
       const col   = state.columns[ci];
       const isCur = ci === state.currentCol;
       const pickY = tabTop - 22;
       const ink   = isCur ? CUR_INK : INK;
-      if (col._pick === 'down') drawDownstroke(cx, colCx[ci], pickY, ink);
-      if (col._pick === 'up')   drawUpstroke(cx, colCx[ci], pickY, ink);
+      const pick  = col._pick || autoPick[ci];
+      if (pick === 'down') drawDownstroke(cx, colCx[ci], pickY, ink);
+      if (pick === 'up')   drawUpstroke(cx, colCx[ci], pickY, ink);
+
+      // Register hit target for all pickable columns (including 'none' state — invisible but clickable)
+      const hasNote = Object.keys(col).some(k => !k.startsWith('_'));
+      if (!col._barline && !col._break && !col._tech && !col._slide && hasNote) {
+        pickHitTargets.push({ ci, x: colCx[ci], y: pickY, shown: pick || null });
+      }
     });
 
     // ── Hammer-on / Pull-off arcs ─────────────────────────────────
@@ -1107,10 +1261,10 @@ function renderTab() {
       const col = state.columns[ci];
       if (!col._tech) return;
 
-      // Find nearest previous non-break column
+      // Find nearest previous non-break/non-barline column
       let prevCi = -1;
       for (let k = ci - 1; k >= 0; k--) {
-        if (!state.columns[k]._break) { prevCi = k; break; }
+        if (!state.columns[k]._break && !state.columns[k]._barline) { prevCi = k; break; }
       }
       if (prevCi < 0 || colCx[prevCi] === undefined) return;  // no prev or cross-system
 
@@ -1140,10 +1294,10 @@ function renderTab() {
       const col = state.columns[ci];
       if (!col._slide) return;
 
-      // Find nearest previous non-break column
+      // Find nearest previous non-break/non-barline column
       let prevCi = -1;
       for (let k = ci - 1; k >= 0; k--) {
-        if (!state.columns[k]._break) { prevCi = k; break; }
+        if (!state.columns[k]._break && !state.columns[k]._barline) { prevCi = k; break; }
       }
       if (prevCi < 0 || colCx[prevCi] === undefined) return;
 
@@ -1186,6 +1340,71 @@ function renderTab() {
       const ink   = isCur ? CUR_INK : INK;
       drawBend(cx, colCx[ci], tabTop + s * TL.lineH, col._bend, ink);
     });
+
+    // ── Vibrato squiggles ─────────────────────────────────────────
+    sys.indices.forEach(ci => {
+      const col = state.columns[ci];
+      if (!col._vib) return;
+
+      // Topmost note in the column
+      let s = -1;
+      for (let k = 0; k < 6; k++) { if (col[k] !== undefined) { s = k; break; } }
+      if (s < 0) return;
+
+      const isCur = ci === state.currentCol;
+      const ink   = isCur ? CUR_INK : INK;
+      drawVibrato(cx, colCx[ci], tabTop + s * TL.lineH - 13, ink);
+    });
+
+    // ── 8va spans ─────────────────────────────────────────────────
+    const eightvaY = musicTop - 18;
+
+    // Collect all column indices on this row that carry _8va
+    const eightvaIndices = sys.indices.filter(ci => state.columns[ci]._8va);
+
+    if (eightvaIndices.length > 0) {
+      cx.font         = `italic bold 10px Georgia, serif`;
+      cx.fillStyle    = INK;
+      cx.textAlign    = 'left';
+      cx.textBaseline = 'bottom';
+      const labelW = cx.measureText('8va').width + 3;
+
+      const ciFirst = eightvaIndices[0];
+      const ciLast  = eightvaIndices[eightvaIndices.length - 1];
+      const x0      = colCx[ciFirst] - cw[ciFirst] / 2;
+      const x1      = colCx[ciLast]  + cw[ciLast]  / 2;
+
+      // Does 8va start on this row (no _8va column before this row)?
+      const isRowStart = !sys.indices.some(ci => ci < ciFirst && state.columns[ci - 1]?._8va) &&
+        (ciFirst === 0 || !state.columns[ciFirst - 1]._8va);
+
+      let lineStartX = x0;
+      if (isRowStart) {
+        cx.fillText('8va', x0, eightvaY + 1);
+        lineStartX = x0 + labelW;
+      }
+
+      // One continuous dashed line from start to end across the whole row
+      cx.strokeStyle = INK;
+      cx.lineWidth   = 0.9;
+      cx.setLineDash([4, 3]);
+      cx.beginPath();
+      cx.moveTo(lineStartX, eightvaY - 3);
+      cx.lineTo(x1,         eightvaY - 3);
+      cx.stroke();
+      cx.setLineDash([]);
+
+      // Terminal hook only if 8va ends on this row
+      const nextGlobalIdx = ciLast + 1;
+      const isEnd = nextGlobalIdx >= state.columns.length || !state.columns[nextGlobalIdx]._8va;
+      if (isEnd) {
+        cx.beginPath();
+        cx.moveTo(x1, eightvaY - 3);
+        cx.lineTo(x1, eightvaY + 5);
+        cx.stroke();
+      }
+    }
+    cx.setLineDash([]);
 
     // ── Music notes ───────────────────────────────────────────────
     renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw);
@@ -1259,6 +1478,18 @@ function syncSlideUI() {
   document.getElementById('btn-slide').classList.toggle('slide-active', state.slideMode);
 }
 
+function syncVibUI() {
+  document.getElementById('btn-vib').classList.toggle('vib-active', state.vibMode);
+}
+
+function syncEightvaUI() {
+  document.getElementById('btn-8va').classList.toggle('eightva-active', state.eightvaMode);
+}
+
+function syncTripletUI() {
+  document.getElementById('btn-triplet').classList.toggle('triplet-active', state.tripletMode);
+}
+
 function syncBendUI() {
   const btn = document.getElementById('btn-bend');
   btn.classList.toggle('bend-half', state.bendMode === '1/2');
@@ -1284,6 +1515,9 @@ function refresh() {
   syncTechUI();
   syncSlideUI();
   syncBendUI();
+  syncVibUI();
+  syncEightvaUI();
+  syncTripletUI();
 
   document.getElementById('col-num').textContent   = state.currentCol + 1;
   document.getElementById('col-total').textContent = state.columns.length;
@@ -1298,13 +1532,13 @@ function refresh() {
 
 function goPrev() {
   let prev = state.currentCol - 1;
-  while (prev >= 0 && state.columns[prev]._break) prev--;
+  while (prev >= 0 && (state.columns[prev]._break || state.columns[prev]._barline)) prev--;
   if (prev >= 0) { state.currentCol = prev; refresh(); }
 }
 
 function goNext() {
   let next = state.currentCol + 1;
-  while (next < state.columns.length && state.columns[next]._break) next++;
+  while (next < state.columns.length && (state.columns[next]._break || state.columns[next]._barline)) next++;
   if (next < state.columns.length) { state.currentCol = next; refresh(); }
 }
 
@@ -1317,6 +1551,21 @@ function addColumn() {
 function addRest() {
   state.columns.splice(state.currentCol + 1, 0, { _dur: state.selectedDur, _rest: true });
   state.currentCol++;
+  refresh();
+}
+
+function toggleVib() {
+  state.vibMode = !state.vibMode;
+  refresh();
+}
+
+function toggleEightva() {
+  state.eightvaMode = !state.eightvaMode;
+  refresh();
+}
+
+function toggleTriplet() {
+  state.tripletMode = !state.tripletMode;
   refresh();
 }
 
@@ -1348,6 +1597,15 @@ function addPick() {
     col._pick       = next;
     state.lastPick  = next;
   }
+  refresh();
+}
+
+function addBarline() {
+  state.columns.splice(state.currentCol + 1, 0,
+    { _barline: true },
+    { _dur: state.selectedDur }
+  );
+  state.currentCol += 2;
   refresh();
 }
 
@@ -1398,6 +1656,9 @@ canvas.addEventListener('click', e => {
     if (state.techMode)  col._tech  = state.techMode;
     if (state.slideMode) col._slide = true;
     if (state.bendMode)  col._bend  = state.bendMode;
+    if (state.vibMode)    col._vib    = true;
+    if (state.eightvaMode)  col._8va     = true;
+    if (state.tripletMode)  col._triplet = true;
   }
   refresh();
 });
@@ -1420,10 +1681,14 @@ document.getElementById('btn-next').addEventListener('click', goNext);
 document.getElementById('btn-add').addEventListener('click', addColumn);
 document.getElementById('btn-add-rest').addEventListener('click', addRest);
 document.getElementById('btn-end-set').addEventListener('click', addGroupBreak);
+document.getElementById('btn-barline').addEventListener('click', addBarline);
 document.getElementById('btn-pick').addEventListener('click', addPick);
 document.getElementById('btn-tech').addEventListener('click', cycleTech);
 document.getElementById('btn-slide').addEventListener('click', toggleSlide);
 document.getElementById('btn-bend').addEventListener('click', cycleBend);
+document.getElementById('btn-vib').addEventListener('click', toggleVib);
+document.getElementById('btn-8va').addEventListener('click', toggleEightva);
+document.getElementById('btn-triplet').addEventListener('click', toggleTriplet);
 document.getElementById('btn-del').addEventListener('click', deleteColumn);
 document.getElementById('btn-clear-col').addEventListener('click', clearColumn);
 document.getElementById('btn-clear-all').addEventListener('click', clearAll);
@@ -1449,8 +1714,152 @@ document.addEventListener('keydown', e => {
     case 'ArrowRight': e.preventDefault(); goNext();       break;
     case 'Enter':      e.preventDefault(); addColumn();    break;
     case 'Backspace':  e.preventDefault(); clearColumn();  break;
+    case ' ':          e.preventDefault(); isPlaying ? stopPlayback() : startPlayback(); break;
   }
 });
+
+// ─── Audio Playback ───────────────────────────────────────────────────────────
+
+let audioCtx      = null;
+let playSchedule  = [];   // [{ ci, t }] — scheduled column start times
+let playStartTime = 0;
+let playAnimFrame = null;
+let isPlaying     = false;
+let priorCol      = 0;    // restore currentCol when playback ends
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+/** Duration of one column in seconds given the current BPM. */
+function colDurSec(col, beatSec) {
+  const dur  = col._dur || 'quarter';
+  const base = dur === 'quarter' ? beatSec : dur === 'eighth' ? beatSec / 2 : beatSec / 4;
+  return col._triplet ? base * 2 / 3 : base;
+}
+
+/**
+ * Schedule a Karplus-Strong plucked-string note.
+ * Sounds convincingly guitar-like without any samples.
+ */
+function ksNote(freq, durSec, ctx, compressor, when) {
+  const sr  = ctx.sampleRate;
+  const N   = Math.max(2, Math.round(sr / freq));
+  const len = Math.ceil(sr * Math.max(durSec * 2.5, 2.0));
+  const buf = ctx.createBuffer(1, len, sr);
+  const d   = buf.getChannelData(0);
+
+  // Seed buffer with white noise
+  const seed = new Float32Array(N);
+  for (let i = 0; i < N; i++) seed[i] = Math.random() * 2 - 1;
+
+  // Karplus-Strong: average adjacent samples → lowpass + feedback = pluck decay
+  for (let i = 0; i < len; i++) {
+    const j = i % N;
+    const k = (i + 1) % N;
+    d[i]     = seed[j];
+    seed[j]  = 0.4975 * (seed[j] + seed[k]); // slightly < 0.5 for natural decay
+  }
+
+  const src  = ctx.createBufferSource();
+  src.buffer = buf;
+
+  const gain = ctx.createGain();
+  const env  = Math.max(durSec * 2.5, 2.0);
+  gain.gain.setValueAtTime(0.65, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + env);
+
+  src.connect(gain);
+  gain.connect(compressor);
+  src.start(when);
+  src.stop(when + env + 0.05);
+}
+
+function startPlayback() {
+  stopPlayback();
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Compressor prevents clipping when chords play simultaneously
+  const comp = audioCtx.createDynamicsCompressor();
+  comp.threshold.value = -18;
+  comp.knee.value      = 6;
+  comp.ratio.value     = 4;
+  comp.attack.value    = 0.003;
+  comp.release.value   = 0.15;
+  comp.connect(audioCtx.destination);
+
+  const bpmEl   = document.getElementById('bpm');
+  const bpm     = Math.max(20, Math.min(300, parseInt(bpmEl.value) || 120));
+  const beatSec = 60 / bpm;
+
+  priorCol     = state.currentCol;
+  playSchedule = [];
+  let t        = audioCtx.currentTime + 0.08;
+
+  state.columns.forEach((col, ci) => {
+    if (col._break || col._barline) return;     // no time, no sound
+    const dur = colDurSec(col, beatSec);
+
+    if (!col._rest) {
+      playSchedule.push({ ci, t });
+      for (let s = 0; s < 6; s++) {
+        if (col[s] === undefined) continue;
+        const bendOff = col._bend === 'full' ? 2 : col._bend === '1/2' ? 1 : 0;
+        const midi    = OPEN_MIDI[s] + col[s] + bendOff + (col._8va ? 12 : 0);
+        ksNote(midiToFreq(midi), dur, audioCtx, comp, t);
+      }
+    }
+
+    t += dur;
+  });
+
+  playStartTime = audioCtx.currentTime + 0.08;
+  isPlaying     = true;
+  document.getElementById('btn-play').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  animatePlayback();
+}
+
+function animatePlayback() {
+  const elapsed = audioCtx.currentTime - playStartTime;
+
+  // Find the column currently playing
+  let activeCi = -1;
+  for (let i = playSchedule.length - 1; i >= 0; i--) {
+    if (playSchedule[i].t - playStartTime <= elapsed + 0.02) {
+      activeCi = playSchedule[i].ci;
+      break;
+    }
+  }
+
+  if (activeCi !== -1 && activeCi !== state.currentCol) {
+    state.currentCol = activeCi;
+    refresh();
+  }
+
+  // Stop when all notes have passed
+  const lastT = playSchedule.length > 0 ? playSchedule[playSchedule.length - 1].t : playStartTime;
+  if (audioCtx.currentTime > lastT + 2.5) {
+    stopPlayback();
+    return;
+  }
+
+  playAnimFrame = requestAnimationFrame(animatePlayback);
+}
+
+function stopPlayback() {
+  if (playAnimFrame) { cancelAnimationFrame(playAnimFrame); playAnimFrame = null; }
+  if (audioCtx)     { audioCtx.close(); audioCtx = null; }
+  isPlaying    = false;
+  playSchedule = [];
+  document.getElementById('btn-play').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+  state.currentCol = priorCol;
+  refresh();
+}
+
+document.getElementById('btn-play').addEventListener('click', startPlayback);
+document.getElementById('btn-stop').addEventListener('click', stopPlayback);
 
 // ─── Duration selector ────────────────────────────────────────────────────────
 
@@ -1470,3 +1879,23 @@ refresh();
 // Re-render tab if the container is resized (e.g. window resize)
 new ResizeObserver(() => renderTab())
   .observe(document.getElementById('tab-canvas').parentElement);
+
+// ── Tab canvas pick-symbol click cycling ──────────────────────────────────────
+// Cycle: down → up → none → down → …
+document.getElementById('tab-canvas').addEventListener('click', e => {
+  const tc   = document.getElementById('tab-canvas');
+  const rect = tc.getBoundingClientRect();
+  const lx   = e.clientX - rect.left;
+  const ly   = e.clientY - rect.top;
+
+  for (const t of pickHitTargets) {
+    if (Math.abs(lx - t.x) <= 14 && Math.abs(ly - t.y) <= 14) {
+      const col = state.columns[t.ci];
+      if      (t.shown === 'down') col._pick = 'up';
+      else if (t.shown === 'up')   col._pick = 'none';
+      else                          col._pick = 'down'; // shown === null or 'none'
+      refresh();
+      return;
+    }
+  }
+});

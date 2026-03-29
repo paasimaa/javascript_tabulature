@@ -241,6 +241,36 @@ button#btn-slide.slide-active:hover {
   background: rgba(80, 160, 220, 0.2);
 }
 
+button#btn-triplet.triplet-active {
+  background: rgba(220, 120, 200, 0.12);
+  border-color: #c060b0;
+  color: #e080d0;
+}
+
+button#btn-triplet.triplet-active:hover {
+  background: rgba(220, 120, 200, 0.22);
+}
+
+button#btn-8va.eightva-active {
+  background: rgba(40, 160, 200, 0.12);
+  border-color: #28a0c8;
+  color: #50c8f0;
+}
+
+button#btn-8va.eightva-active:hover {
+  background: rgba(40, 160, 200, 0.22);
+}
+
+button#btn-vib.vib-active {
+  background: rgba(160, 80, 220, 0.12);
+  border-color: #a050dc;
+  color: #c080f0;
+}
+
+button#btn-vib.vib-active:hover {
+  background: rgba(160, 80, 220, 0.22);
+}
+
 button#btn-bend.bend-half,
 button#btn-bend.bend-full {
   background: rgba(220, 180, 40, 0.12);
@@ -263,6 +293,45 @@ button#btn-tech.tech-pull {
 button#btn-tech.tech-hammer:hover,
 button#btn-tech.tech-pull:hover {
   background: rgba(80, 192, 80, 0.2);
+}
+
+/* ── Playback controls ────────────────────────────────────────────────────── */
+
+#bpm {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 5px 6px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 52px;
+  text-align: center;
+}
+
+#bpm:focus {
+  outline: none;
+  border-color: #444;
+}
+
+button#btn-play {
+  color: var(--green);
+  border-color: #1a3a1a;
+}
+
+button#btn-play:hover:not(:disabled) {
+  background: #0e2a0e;
+  border-color: var(--green);
+}
+
+button#btn-stop {
+  color: #ff6060;
+  border-color: #3a1a1a;
+}
+
+button#btn-stop:hover:not(:disabled) {
+  background: #2a1010;
+  border-color: var(--danger);
 }
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */

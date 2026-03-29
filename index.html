@@ -28,6 +28,7 @@
 
       <div class="ctrl-group edit">
         <button id="btn-add" title="Insert column after current (Enter)">+ Add Column</button>
+        <button id="btn-barline" title="Insert bar line">| Bar</button>
         <button id="btn-del" title="Delete current column">&#8722; Delete Column</button>
         <button id="btn-clear-col" title="Clear notes in current column (Backspace)">&#9003; Clear Column</button>
         <button id="btn-clear-all" class="danger" title="Clear everything">&#128465; Clear All</button>
@@ -37,6 +38,16 @@
         <button id="btn-tech" title="Cycle hammer-on / pull-off mode (H → P → off)">H / P</button>
         <button id="btn-slide" title="Toggle slide mode">Slide</button>
         <button id="btn-bend" title="Cycle bend amount (1/2 step → full step → off)">Bend</button>
+        <button id="btn-vib" title="Toggle vibrato">Vibrato</button>
+        <button id="btn-8va" title="Toggle 8va — play one octave higher">8va</button>
+        <button id="btn-triplet" title="Toggle triplet mode">Triplet</button>
+      </div>
+
+      <div class="ctrl-group play">
+        <button id="btn-play" title="Play tab (Space)">&#9654; Play</button>
+        <button id="btn-stop" title="Stop playback (Space)" disabled>&#9632; Stop</button>
+        <label class="ctrl-label" for="bpm">BPM</label>
+        <input type="number" id="bpm" value="120" min="20" max="300">
       </div>
 
       <div class="ctrl-group export">
