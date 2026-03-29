@@ -241,6 +241,18 @@ button#btn-slide.slide-active:hover {
   background: rgba(80, 160, 220, 0.2);
 }
 
+button#btn-bend.bend-half,
+button#btn-bend.bend-full {
+  background: rgba(220, 180, 40, 0.12);
+  border-color: #c8a820;
+  color: #e0c040;
+}
+
+button#btn-bend.bend-half:hover,
+button#btn-bend.bend-full:hover {
+  background: rgba(220, 180, 40, 0.22);
+}
+
 button#btn-tech.tech-hammer,
 button#btn-tech.tech-pull {
   background: rgba(80, 192, 80, 0.12);

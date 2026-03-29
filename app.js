@@ -47,6 +47,7 @@ const state = {
   lastPick:    'up',                  // last added pick direction; next will be opposite
   techMode:    null,                  // null | 'hammer' | 'pull'
   slideMode:   false,                 // straight-line slide between notes
+  bendMode:    null,                  // null | '1/2' | 'full'
 };
 
 // ─── Canvas & Layout ──────────────────────────────────────────────────────────
@@ -375,15 +376,80 @@ function ledgerSteps(step) {
 // ── Shared note-drawing primitives ───────────────────────────────────────────
 
 /** Collect { step, pc } for every fretted string in a column. */
-function getColNotes(col) {
+function getColNotes(col, extraSemitones = 0) {
   const out = [];
   for (let s = 0; s < 6; s++) {
     const fret = col[s];
     if (fret === undefined) continue;
-    const midi = OPEN_MIDI[s] + fret + GUITAR_8VA;
-    out.push({ step: fretToStep(s, fret), pc: ((midi % 12) + 12) % 12 });
+    const midi = OPEN_MIDI[s] + fret + GUITAR_8VA + extraSemitones;
+    const pc   = ((midi % 12) + 12) % 12;
+    const oct  = Math.floor(midi / 12) - 1;
+    const step = oct * 7 + PC_TO_DIAT[pc] - E4_DIAT;
+    out.push({ step, pc });
   }
   return out;
+}
+
+/** Semitones added by a bend. */
+function bendSemitones(bend) {
+  return bend === 'full' ? 2 : bend === '1/2' ? 1 : 0;
+}
+
+/**
+ * Draw a grace note (small, with stem + slash) at ncx for the given notes.
+ * Used to show the pre-bend pitch before a bent main note.
+ */
+function drawGraceNote(cx, ncx, notes, botY, lineH, ink) {
+  if (notes.length === 0) return;
+  const scale  = 0.62;
+  const nhW    = lineH * 1.1 * scale;
+  const nhH    = lineH * 0.72 * scale;
+  const avgStep = notes.reduce((a, n) => a + n.step, 0) / notes.length;
+  const stemUp  = avgStep <= 4;
+  const stemX   = ncx + (stemUp ? nhW * 0.43 : -nhW * 0.43);
+  const stemLen = lineH * 3.5 * 0.3;   // 30% of normal stem length
+  const minStep = Math.min(...notes.map(n => n.step));
+  const maxStep = Math.max(...notes.map(n => n.step));
+  const anchorY = stepY(stemUp ? minStep : maxStep, botY, lineH);
+  const tipY    = stepY(stemUp ? maxStep : minStep, botY, lineH) + (stemUp ? -stemLen : stemLen);
+
+  // Stem
+  cx.strokeStyle = ink;
+  cx.lineWidth   = 0.75;
+  cx.beginPath();
+  cx.moveTo(stemX, anchorY);
+  cx.lineTo(stemX, tipY);
+  cx.stroke();
+
+  // Slash across the stem (acciaccatura style)
+  cx.lineWidth = 0.75;
+  cx.beginPath();
+  cx.moveTo(stemX - 3, tipY + 6);
+  cx.lineTo(stemX + 3, tipY - 2);
+  cx.stroke();
+
+  // Note heads (smaller)
+  notes.forEach(({ step, pc }) => {
+    const ny = stepY(step, botY, lineH);
+
+    if (PC_SHARP[pc]) {
+      const sz = Math.max(7, Math.round(lineH * 0.8));
+      cx.font         = `bold ${sz}px Georgia, serif`;
+      cx.fillStyle    = ink;
+      cx.textAlign    = 'right';
+      cx.textBaseline = 'middle';
+      cx.fillText('♯', ncx - nhW / 2 - 1, ny + 1);
+    }
+
+    cx.fillStyle = ink;
+    cx.save();
+    cx.translate(ncx, ny);
+    cx.rotate(-Math.PI / 9);
+    cx.beginPath();
+    cx.ellipse(0, 0, nhW / 2, nhH / 2, 0, 0, Math.PI * 2);
+    cx.fill();
+    cx.restore();
+  });
 }
 
 /** Draw note heads, ledger lines and accidentals for a set of notes at x = ncx. */
@@ -429,10 +495,17 @@ function drawNoteHeads(cx, ncx, notes, botY, lineH, ink) {
 
 /** Draw a single note column (with flags for isolated 16th notes). */
 function drawMusicNotes(cx, col, noteCx, botY, lineH, isCurrent) {
-  const notes = getColNotes(col);
+  const semi  = bendSemitones(col._bend);
+  const notes = getColNotes(col, semi);
   if (notes.length === 0) return;
 
-  const ink      = isCurrent ? CUR_INK : INK;
+  const ink = isCurrent ? CUR_INK : INK;
+
+  // Grace note at original pitch if bent
+  if (semi > 0) {
+    const graceOff = lineH * 1.1;
+    drawGraceNote(cx, noteCx - graceOff, getColNotes(col), botY, lineH, ink);
+  }
   const nhW      = lineH * 1.1;
   const avgStep  = notes.reduce((a, n) => a + n.step, 0) / notes.length;
   const stemUp   = avgStep <= 4;
@@ -468,8 +541,12 @@ function drawMusicNotes(cx, col, noteCx, botY, lineH, isCurrent) {
 function drawBeamedGroup(cx, items, botY, lineH, beamCount) {
   const nhW = lineH * 1.1;
 
-  // Attach note arrays
-  const cols = items.map(item => ({ ...item, notes: getColNotes(item.col) }));
+  // Attach note arrays (use bent pitch for stem/beam geometry if bent)
+  const cols = items.map(item => ({
+    ...item,
+    notes:      getColNotes(item.col, bendSemitones(item.col._bend)),
+    origNotes:  getColNotes(item.col),
+  }));
 
   // Group-wide stem direction from all notes combined
   const allSteps = cols.flatMap(c => c.notes.map(n => n.step));
@@ -518,8 +595,13 @@ function drawBeamedGroup(cx, items, botY, lineH, beamCount) {
   cx.fillRect(x0 - 0.5, b1Top, x1 - x0 + 1, beamH);
   if (beamCount >= 2) cx.fillRect(x0 - 0.5, b2Top, x1 - x0 + 1, beamH);
 
-  // Note heads per column
+  // Note heads per column (grace note before main note if bent)
   enriched.forEach(e => {
+    const semi = bendSemitones(e.col._bend);
+    if (semi > 0) {
+      const graceOff = lineH * 1.1;
+      drawGraceNote(cx, e.ncx - graceOff, e.origNotes, botY, lineH, e.isCur ? CUR_INK : INK);
+    }
     drawNoteHeads(cx, e.ncx, e.notes, botY, lineH, e.isCur ? CUR_INK : INK);
   });
 }
@@ -785,6 +867,48 @@ function drawSlide(cx, x0, y0, x1, y1, edgeOff0, edgeOff1, ink) {
   cx.fillText('s', midX, midY - 1);
 }
 
+// ── Bend arrow ───────────────────────────────────────────────────────────────
+
+/**
+ * Draw an upward curved arrow with amount label ('1/2' or 'full') above it.
+ * x/y = centre of the fret number in the tab staff.
+ */
+function drawBend(cx, x, y, amount, ink) {
+  const startX  = x;
+  const startY  = y - 7;         // just above the fret number
+  const tipX    = x + 5;         // slight rightward lean at the top
+  const tipY    = y - 30;        // how high the arrow goes
+  const ctrlX   = x + 10;        // control point pulls arc rightward
+  const ctrlY   = startY - 14;
+
+  cx.strokeStyle = ink;
+  cx.fillStyle   = ink;
+  cx.lineWidth   = 1.3;
+  cx.lineCap     = 'round';
+
+  // Curved shaft
+  cx.beginPath();
+  cx.moveTo(startX, startY);
+  cx.quadraticCurveTo(ctrlX, ctrlY, tipX, tipY);
+  cx.stroke();
+
+  // Arrowhead at the tip (two short lines pointing back down)
+  const aLen = 5;
+  cx.lineWidth = 1.2;
+  cx.beginPath();
+  cx.moveTo(tipX, tipY);
+  cx.lineTo(tipX - aLen, tipY + aLen);
+  cx.moveTo(tipX, tipY);
+  cx.lineTo(tipX + 2, tipY + aLen + 1);
+  cx.stroke();
+
+  // Label above the tip
+  cx.font         = `bold 8px system-ui, sans-serif`;
+  cx.textAlign    = 'center';
+  cx.textBaseline = 'bottom';
+  cx.fillText(amount, tipX, tipY - 2);
+}
+
 function renderTab() {
   const tc          = document.getElementById('tab-canvas');
   const wrap        = tc.parentElement;
@@ -1048,6 +1172,21 @@ function renderTab() {
       drawSlide(cx, x0, y0, x1, y1, off0, off1, ink);
     });
 
+    // ── Bend arrows ───────────────────────────────────────────────
+    sys.indices.forEach(ci => {
+      const col = state.columns[ci];
+      if (!col._bend) return;
+
+      // Topmost note in the column
+      let s = -1;
+      for (let k = 0; k < 6; k++) { if (col[k] !== undefined) { s = k; break; } }
+      if (s < 0) return;
+
+      const isCur = ci === state.currentCol;
+      const ink   = isCur ? CUR_INK : INK;
+      drawBend(cx, colCx[ci], tabTop + s * TL.lineH, col._bend, ink);
+    });
+
     // ── Music notes ───────────────────────────────────────────────
     renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw);
 
@@ -1120,6 +1259,15 @@ function syncSlideUI() {
   document.getElementById('btn-slide').classList.toggle('slide-active', state.slideMode);
 }
 
+function syncBendUI() {
+  const btn = document.getElementById('btn-bend');
+  btn.classList.toggle('bend-half', state.bendMode === '1/2');
+  btn.classList.toggle('bend-full', state.bendMode === 'full');
+  btn.textContent =
+    state.bendMode === '1/2'  ? 'Bend 1/2' :
+    state.bendMode === 'full' ? 'Bend full' : 'Bend';
+}
+
 function syncTechUI() {
   const btn = document.getElementById('btn-tech');
   btn.classList.toggle('tech-hammer', state.techMode === 'hammer');
@@ -1135,6 +1283,7 @@ function refresh() {
   syncDurationUI();
   syncTechUI();
   syncSlideUI();
+  syncBendUI();
 
   document.getElementById('col-num').textContent   = state.currentCol + 1;
   document.getElementById('col-total').textContent = state.columns.length;
@@ -1168,6 +1317,13 @@ function addColumn() {
 function addRest() {
   state.columns.splice(state.currentCol + 1, 0, { _dur: state.selectedDur, _rest: true });
   state.currentCol++;
+  refresh();
+}
+
+function cycleBend() {
+  const modes   = [null, '1/2', 'full'];
+  const nextIdx = (modes.indexOf(state.bendMode) + 1) % modes.length;
+  state.bendMode = modes[nextIdx];
   refresh();
 }
 
@@ -1241,6 +1397,7 @@ canvas.addEventListener('click', e => {
     col[hit.string] = hit.fret;
     if (state.techMode)  col._tech  = state.techMode;
     if (state.slideMode) col._slide = true;
+    if (state.bendMode)  col._bend  = state.bendMode;
   }
   refresh();
 });
@@ -1266,6 +1423,7 @@ document.getElementById('btn-end-set').addEventListener('click', addGroupBreak);
 document.getElementById('btn-pick').addEventListener('click', addPick);
 document.getElementById('btn-tech').addEventListener('click', cycleTech);
 document.getElementById('btn-slide').addEventListener('click', toggleSlide);
+document.getElementById('btn-bend').addEventListener('click', cycleBend);
 document.getElementById('btn-del').addEventListener('click', deleteColumn);
 document.getElementById('btn-clear-col').addEventListener('click', clearColumn);
 document.getElementById('btn-clear-all').addEventListener('click', clearAll);
