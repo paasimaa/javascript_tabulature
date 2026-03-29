@@ -336,7 +336,7 @@ const PAPER  = '#fafaf8';
 // Preload treble clef image; re-render tab once it's ready
 const trebleClefImg = new Image();
 trebleClefImg.onload = () => renderTab();
-trebleClefImg.src = 'treble-clef.svg';
+trebleClefImg.src = 'treble-clef.png';
 const INK    = '#111111';
 const INK_DIM = '#aaaaaa';
 const CUR_BG  = 'rgba(210, 80, 20, 0.06)';
@@ -1101,13 +1101,13 @@ function renderTab() {
     const staffW    = logW - 2 * TL.padH - TL.clefW;
     const isLast    = si === systems.length - 1;
 
-    // ── Music staff (5 lines) ─────────────────────────────────────
+    // ── Music staff (5 lines) — start from left margin so clef sits on the lines
     cx.strokeStyle = INK;
     cx.lineWidth   = 0.75;
     for (let l = 0; l < 5; l++) {
       const y = musicTop + l * TL.musicLineH + 0.5;
       cx.beginPath();
-      cx.moveTo(staffX, y);
+      cx.moveTo(TL.padH, y);
       cx.lineTo(staffX + staffW, y);
       cx.stroke();
     }
@@ -1115,13 +1115,13 @@ function renderTab() {
     // ── Treble clef ───────────────────────────────────────────────
     drawTrebleClef(cx, TL.padH + 4, musicTop, musicStaffH);
 
-    // ── Tab staff (6 lines) ───────────────────────────────────────
+    // ── Tab staff (6 lines) — start from left margin so TAB sits on the lines
     cx.strokeStyle = INK;
     cx.lineWidth   = 0.75;
     for (let s = 0; s < 6; s++) {
       const y = tabTop + s * TL.lineH + 0.5;
       cx.beginPath();
-      cx.moveTo(staffX, y);
+      cx.moveTo(TL.padH, y);
       cx.lineTo(staffX + staffW, y);
       cx.stroke();
     }
@@ -1150,12 +1150,6 @@ function renderTab() {
     cx.lineWidth = 1;
     const barTop = musicTop;
     const barBot = tabTop + tabStaffH;
-
-    // Opening barline
-    cx.beginPath();
-    cx.moveTo(staffX + 0.5, barTop);
-    cx.lineTo(staffX + 0.5, barBot);
-    cx.stroke();
 
     // Closing barline
     cx.beginPath();
@@ -1906,6 +1900,100 @@ document.getElementById('btn-stop').addEventListener('click', stopPlayback);
     refresh();
   });
 });
+
+// ─── EJ Lick Generator ────────────────────────────────────────────────────────
+
+function generateEJLick() {
+  // E minor pentatonic frets per string (string 0 = high e, 5 = low E)
+  const PENTA = [
+    [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24],  // 0: e
+    [0, 3, 5, 8, 10, 12, 15, 17, 20, 22, 24],  // 1: B
+    [0, 2, 4, 7,  9, 12, 14, 16, 19, 21, 24],  // 2: G
+    [0, 2, 5, 7,  9, 12, 14, 17, 19, 21, 24],  // 3: D
+    [0, 2, 5, 7, 10, 12, 14, 17, 19, 22, 24],  // 4: A
+    [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24],  // 5: E
+  ];
+
+  const rnd = n => Math.floor(Math.random() * n);
+
+  // EJ's preferred higher-neck positions
+  const [minF, maxF] = [[5,10],[7,12],[7,12],[10,15],[12,17]][rnd(5)];
+
+  // Pick two frets per string (high→low) from within range.
+  // Randomly selects which adjacent pair to use when >2 frets are available.
+  const twoFrets = str => {
+    const f = PENTA[str].filter(x => x >= minF && x <= maxF);
+    if (f.length >= 3) {
+      const i = rnd(f.length - 1);          // random adjacent pair
+      return [f[i + 1], f[i]];             // hi, lo (descending)
+    }
+    if (f.length === 2) return [f[1], f[0]];
+    if (f.length === 1) return [f[0], f[0]];
+    return null;
+  };
+
+  // ── Build 5-note descending groups: str[hi,lo], str+1[hi,lo], str+2[hi] ──────
+  // Advance by 1 string per group, creating the cascading EJ waterfall effect.
+  const groups = [];
+  for (let s = 0; s <= 3; s++) {
+    const f0 = twoFrets(s);
+    const f1 = twoFrets(s + 1);
+    const f2 = twoFrets(s + 2);
+    if (f0 && f1 && f2 && !(f0[0] === f0[1] && f1[0] === f1[1])) {
+      groups.push([
+        { str: s,   fret: f0[0] },
+        { str: s,   fret: f0[1] },
+        { str: s+1, fret: f1[0] },
+        { str: s+1, fret: f1[1] },
+        { str: s+2, fret: f2[0] },
+      ]);
+    }
+  }
+
+  if (groups.length === 0) {
+    state.columns = [{ _dur: 'quarter' }];
+    state.currentCol = 0;
+    refresh();
+    return;
+  }
+
+  const bars        = 1 + rnd(5);
+  const targetNotes = bars * 16;
+  const seq         = [];
+
+  // Cycle through groups until we have enough notes
+  let g = 0;
+  while (seq.length < targetNotes) {
+    groups[g % groups.length].forEach(n => {
+      if (seq.length < targetNotes) seq.push({ ...n });
+    });
+    g++;
+    if (g > 200) break; // safety
+  }
+
+  // ── Build columns — all picked (no H/P), all sixteenth notes ────────────────
+  const cols = [];
+  seq.forEach((note, i) => {
+    if (i > 0 && i % 16 === 0) cols.push({ _barline: true });
+    const col = { _dur: 'sixteenth' };
+    col[note.str] = note.fret;
+    cols.push(col);
+  });
+
+  // Phrase ending: bend + vibrato, slightly held
+  const lastReal = [...cols].reverse().find(c => !c._barline);
+  if (lastReal) {
+    lastReal._bend = Math.random() > 0.5 ? 'full' : '1/2';
+    lastReal._vib  = true;
+    lastReal._dur  = 'eighth';
+  }
+
+  state.columns    = cols.length ? cols : [{ _dur: 'quarter' }];
+  state.currentCol = 0;
+  refresh();
+}
+
+document.getElementById('btn-ej-lick').addEventListener('click', generateEJLick);
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 

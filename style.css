@@ -145,6 +145,17 @@ button#btn-copy:hover {
   color: #ffa060;
 }
 
+button#btn-ej-lick {
+  color: #c080f0;
+  border-color: #2a1040;
+}
+
+button#btn-ej-lick:hover {
+  background: #1a0830;
+  border-color: #9050c0;
+  color: #d8a0ff;
+}
+
 button#btn-pdf {
   color: #80c0f0;
   border-color: #102a3a;
