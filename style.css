@@ -91,6 +91,15 @@ h1 {
   gap: 6px;
 }
 
+.ctrl-group.edit {
+  flex-wrap: wrap;
+}
+
+.ctrl-row-break {
+  flex-basis: 100%;
+  height: 0;
+}
+
 .ctrl-group + .ctrl-group {
   padding-left: 12px;
   border-left: 1px solid var(--border);
@@ -223,11 +232,16 @@ button#btn-pdf:hover {
 
 .tab-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface2);
+  flex-wrap: wrap;
+}
+
+.tab-header .tab-hint {
+  margin-left: auto;
 }
 
 .tab-title {
@@ -241,6 +255,55 @@ button#btn-pdf:hover {
 .tab-hint {
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.view-toggle-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.view-toggle-btn.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent-hi);
+}
+
+.view-toggle-btn.draw-scale-active {
+  background: rgba(200, 100, 240, 0.12);
+  border-color: #a060d0;
+  color: #d090ff;
+}
+
+.view-toggle-btn.draw-scale-active:hover {
+  background: rgba(200, 100, 240, 0.22);
+}
+
+.view-toggle-btn.draw-triad-active {
+  background: rgba(80, 144, 208, 0.12);
+  border-color: #4070b0;
+  color: #80b8f0;
+}
+
+.view-toggle-btn.draw-triad-active:hover {
+  background: rgba(80, 144, 208, 0.22);
+}
+
+#scale-key-select,
+#scale-type-select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+#scale-key-select:focus,
+#scale-type-select:focus {
+  outline: none;
+  border-color: #444;
 }
 
 #sheet-title-area {

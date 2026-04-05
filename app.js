@@ -52,7 +52,11 @@ const state = {
   eightvaMode:  false,                // 8va — play notes one octave higher
   tripletMode:  false,                // group notes in triplets
   autoAdvance:  false,                // auto-add new column after each note placed
-
+  viewMode:     'tab',                // 'tab' | 'scale'
+  scaleKey:     'A',                  // root note for scale overlay
+  scaleType:    'Minor Pentatonic',   // key into SCALES
+  scaleDrawn:   false,                // whether to show scale position diagrams
+  triadDrawn:   false,                // whether to show open triad diagrams
 };
 
 // ─── Canvas & Layout ──────────────────────────────────────────────────────────
@@ -365,6 +369,21 @@ const PC_TO_DIAT = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
 // Which pitch classes require a sharp sign
 const PC_SHARP = [false, true, false, true, false, false, true, false, true, false, true, false];
 
+// Note names for scale diagram display (pitch class 0=C … 11=B)
+const NOTE_NAMES = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+
+const SCALES = {
+  'Minor Pentatonic': [0, 3, 5, 7, 10],
+  'Major Pentatonic': [0, 2, 4, 7, 9],
+  'Blues':            [0, 3, 5, 6, 7, 10],
+  'Major':            [0, 2, 4, 5, 7, 9, 11],
+  'Minor':            [0, 2, 3, 5, 7, 8, 10],
+  'Dorian':           [0, 2, 3, 5, 7, 9, 10],
+  'Mixolydian':       [0, 2, 4, 5, 7, 9, 10],
+  'Harmonic Minor':   [0, 2, 3, 5, 7, 8, 11],
+  'Melodic Minor':    [0, 2, 3, 5, 7, 9, 11],
+};
+
 // Diatonic steps from C0 to E4 (bottom staff line in treble clef)
 //   E4 → oct=4, diat-in-oct=2  →  4*7+2 = 30
 const E4_DIAT = 30;
@@ -475,7 +494,7 @@ function drawGraceNote(cx, ncx, notes, botY, lineH, ink) {
 }
 
 /** Draw note heads, ledger lines and accidentals for a set of notes at x = ncx. */
-function drawNoteHeads(cx, ncx, notes, botY, lineH, ink) {
+function drawNoteHeads(cx, ncx, notes, botY, lineH, ink, hollow = false) {
   const nhW = lineH * 1.1;
   const nhH = lineH * 0.72;
   const drawnLedgers = new Set();
@@ -504,13 +523,19 @@ function drawNoteHeads(cx, ncx, notes, botY, lineH, ink) {
       cx.fillText('♯', ncx - nhW / 2 - 2, ny + 1);
     }
 
-    cx.fillStyle = ink;
     cx.save();
     cx.translate(ncx, ny);
     cx.rotate(-Math.PI / 9);
     cx.beginPath();
     cx.ellipse(0, 0, nhW / 2, nhH / 2, 0, 0, Math.PI * 2);
-    cx.fill();
+    if (hollow) {
+      cx.strokeStyle = ink;
+      cx.lineWidth   = 1.5;
+      cx.stroke();
+    } else {
+      cx.fillStyle = ink;
+      cx.fill();
+    }
     cx.restore();
   });
 }
@@ -523,35 +548,40 @@ function drawMusicNotes(cx, col, noteCx, botY, lineH, isCurrent) {
   if (notes.length === 0) return;
 
   const ink = isCurrent ? CUR_INK : INK;
+  const dur = col._dur || 'quarter';
 
   // Grace note at original pitch (with octave shift if 8va) if bent
   if (col._bend) {
     const graceOff = lineH * 1.1;
     drawGraceNote(cx, noteCx - graceOff, getColNotes(col, octShift), botY, lineH, ink);
   }
-  const nhW      = lineH * 1.1;
-  const avgStep  = notes.reduce((a, n) => a + n.step, 0) / notes.length;
-  const stemUp   = avgStep <= 4;
-  const stemXOff = stemUp ? nhW * 0.43 : -nhW * 0.43;
-  const stemLen  = lineH * 3.5;
-  const minStep  = Math.min(...notes.map(n => n.step));
-  const maxStep  = Math.max(...notes.map(n => n.step));
-  const anchorY  = stepY(stemUp ? minStep : maxStep, botY, lineH);
-  const farY     = stepY(stemUp ? maxStep : minStep, botY, lineH);
-  const tipY     = farY + (stemUp ? -stemLen : stemLen);
 
-  cx.strokeStyle = ink;
-  cx.lineWidth   = 1.1;
-  cx.beginPath();
-  cx.moveTo(noteCx + stemXOff, anchorY);
-  cx.lineTo(noteCx + stemXOff, tipY);
-  cx.stroke();
+  const hollow = (dur === 'half' || dur === 'whole');
 
-  const dur = col._dur || 'quarter';
-  if (dur === 'eighth')    drawFlags(cx, noteCx + stemXOff, tipY, stemUp, 1, lineH, ink);
-  if (dur === 'sixteenth') drawFlags(cx, noteCx + stemXOff, tipY, stemUp, 2, lineH, ink);
+  if (dur !== 'whole') {
+    const nhW      = lineH * 1.1;
+    const avgStep  = notes.reduce((a, n) => a + n.step, 0) / notes.length;
+    const stemUp   = avgStep <= 4;
+    const stemXOff = stemUp ? nhW * 0.43 : -nhW * 0.43;
+    const stemLen  = lineH * 3.5;
+    const minStep  = Math.min(...notes.map(n => n.step));
+    const maxStep  = Math.max(...notes.map(n => n.step));
+    const anchorY  = stepY(stemUp ? minStep : maxStep, botY, lineH);
+    const farY     = stepY(stemUp ? maxStep : minStep, botY, lineH);
+    const tipY     = farY + (stemUp ? -stemLen : stemLen);
 
-  drawNoteHeads(cx, noteCx, notes, botY, lineH, ink);
+    cx.strokeStyle = ink;
+    cx.lineWidth   = 1.1;
+    cx.beginPath();
+    cx.moveTo(noteCx + stemXOff, anchorY);
+    cx.lineTo(noteCx + stemXOff, tipY);
+    cx.stroke();
+
+    if (dur === 'eighth')    drawFlags(cx, noteCx + stemXOff, tipY, stemUp, 1, lineH, ink);
+    if (dur === 'sixteenth') drawFlags(cx, noteCx + stemXOff, tipY, stemUp, 2, lineH, ink);
+  }
+
+  drawNoteHeads(cx, noteCx, notes, botY, lineH, ink, hollow);
 }
 
 // ── Beamed group rendering ────────────────────────────────────────────────────
@@ -726,10 +756,30 @@ function drawSixteenthRest(cx, x, staffBotY, lineH, ink) {
   });
 }
 
+/** Half rest — filled rectangle sitting on top of the middle staff line. */
+function drawHalfRest(cx, x, staffBotY, lineH, ink) {
+  const sy = s => stepY(s, staffBotY, lineH);
+  const w  = lineH * 1.1;
+  const h  = lineH * 0.45;
+  cx.fillStyle = ink;
+  cx.fillRect(x - w / 2, sy(4) - h, w, h);
+}
+
+/** Whole rest — filled rectangle hanging below a staff line. */
+function drawWholeRest(cx, x, staffBotY, lineH, ink) {
+  const sy = s => stepY(s, staffBotY, lineH);
+  const w  = lineH * 1.3;
+  const h  = lineH * 0.45;
+  cx.fillStyle = ink;
+  cx.fillRect(x - w / 2, sy(6), w, h);
+}
+
 function drawRest(cx, x, staffBotY, lineH, dur, ink) {
-  if (dur === 'quarter')    drawQuarterRest(cx, x, staffBotY, lineH, ink);
+  if (dur === 'whole')       drawWholeRest(cx, x, staffBotY, lineH, ink);
+  else if (dur === 'half')   drawHalfRest(cx, x, staffBotY, lineH, ink);
+  else if (dur === 'quarter') drawQuarterRest(cx, x, staffBotY, lineH, ink);
   else if (dur === 'eighth') drawEighthRest(cx, x, staffBotY, lineH, ink);
-  else                      drawSixteenthRest(cx, x, staffBotY, lineH, ink);
+  else                       drawSixteenthRest(cx, x, staffBotY, lineH, ink);
 }
 
 /**
@@ -1030,7 +1080,411 @@ function drawBend(cx, x, y, amount, ink) {
   cx.fillText(amount, tipX, tipY - 2);
 }
 
+// ─── Scale Diagram ────────────────────────────────────────────────────────────
+
+/** Draw one scale diagram at canvas offset (ox, oy). */
+function drawSingleScaleDiagram(cx, diag, ox, oy) {
+  const { allPos, curPos, dispMin, dispMax, boardW } = diag;
+  const labelW = 26, padH = 36, padV = 36, strGap = 26, numH = 20, cellW = 42;
+  const boardH = 5 * strGap;
+  const captionH = diag.label ? 18 : 0;
+
+  const x0 = ox + padH + labelW;
+  const y0 = oy + padV + captionH;
+
+  // Caption label above diagram
+  if (diag.label) {
+    cx.textAlign    = 'left';
+    cx.textBaseline = 'top';
+    cx.font         = 'bold 11px sans-serif';
+    cx.fillStyle    = INK_DIM;
+    cx.fillText(diag.label, ox + padH, oy + padV);
+  }
+
+  const dotCx = fret => x0 + (fret - dispMin + 0.5) * cellW;
+  const wireX = n    => x0 + (n    - dispMin) * cellW;
+  const strY  = s    => y0 + s * strGap;
+
+  // Position markers (fretboard inlays)
+  const midY = y0 + boardH / 2;
+  cx.fillStyle = '#d8d4ce';
+  for (const f of SINGLE_DOTS) {
+    if (f < dispMin || f > dispMax) continue;
+    cx.beginPath(); cx.arc(dotCx(f), midY, 5, 0, Math.PI * 2); cx.fill();
+  }
+  for (const f of DOUBLE_DOTS) {
+    if (f < dispMin || f > dispMax) continue;
+    cx.beginPath(); cx.arc(dotCx(f), midY - strGap, 5, 0, Math.PI * 2); cx.fill();
+    cx.beginPath(); cx.arc(dotCx(f), midY + strGap, 5, 0, Math.PI * 2); cx.fill();
+  }
+
+  // Fret wires
+  cx.strokeStyle = '#aaa';
+  cx.lineWidth   = 0.8;
+  for (let f = dispMin; f <= dispMax + 1; f++) {
+    const x = wireX(f);
+    cx.beginPath(); cx.moveTo(x, y0); cx.lineTo(x, y0 + boardH); cx.stroke();
+  }
+
+  // Nut
+  if (dispMin === 0) {
+    cx.fillStyle = INK;
+    cx.fillRect(wireX(0) - 1.5, y0, 5, boardH);
+  }
+
+  // Strings
+  for (let s = 0; s < 6; s++) {
+    cx.strokeStyle = '#888';
+    cx.lineWidth   = 0.5 + (5 - s) * 0.2;
+    cx.beginPath(); cx.moveTo(x0, strY(s)); cx.lineTo(x0 + boardW, strY(s)); cx.stroke();
+  }
+
+  // String labels
+  cx.textAlign = 'right'; cx.textBaseline = 'middle';
+  cx.font = 'bold 11px sans-serif'; cx.fillStyle = INK_DIM;
+  for (let s = 0; s < 6; s++) cx.fillText(STRINGS[s], x0 - 8, strY(s));
+
+  // Fret numbers
+  cx.textAlign = 'center'; cx.textBaseline = 'top';
+  cx.font = '10px sans-serif'; cx.fillStyle = INK_DIM;
+  for (let f = dispMin; f <= dispMax; f++) {
+    if (f === 0) continue;
+    cx.fillText(String(f), dotCx(f), y0 + boardH + 6);
+  }
+
+  // Note dots with note names
+  const dotR = Math.min(10, cellW * 0.38, strGap * 0.40);
+  cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  for (const key of allPos.keys()) {
+    const [s, fret] = key.split(',').map(Number);
+    const isCur = curPos.has(key);
+    const dx = dotCx(fret), dy = strY(s);
+    const pc   = ((OPEN_MIDI[s] + fret) % 12 + 12) % 12;
+    const name = NOTE_NAMES[pc];
+
+    cx.beginPath(); cx.arc(dx, dy, dotR, 0, Math.PI * 2);
+    cx.fillStyle = isCur ? CUR_INK : INK; cx.fill();
+
+    cx.fillStyle = PAPER;
+    cx.font = `bold ${name.length > 1 ? Math.max(6, dotR * 0.72) : Math.max(7, dotR * 0.85)}px sans-serif`;
+    cx.fillText(name, dx, dy + 0.5);
+  }
+}
+
+/**
+ * Compute one scale diagram per position (box) for the current scaleKey/scaleType.
+ * A position is anchored on any fret of the low E string (fret 0–11) where the
+ * note is in the scale.  Each position covers a 4-fret window starting at that
+ * anchor fret.  Root notes go into curPos (rendered orange).
+ * Returns an array of diagram descriptors compatible with drawSingleScaleDiagram.
+ */
+function computeScalePositions() {
+  const intervals = SCALES[state.scaleType];
+  if (!intervals) return [];
+  const rootPc = NOTE_NAMES.indexOf(state.scaleKey);
+  if (rootPc < 0) return [];
+  const scaleSet = new Set(intervals.map(i => (rootPc + i) % 12));
+
+  const diagrams = [];
+  // Find anchor frets on low E string (string index 5 in OPEN_MIDI = low E)
+  for (let anchor = 0; anchor <= 11; anchor++) {
+    const anchorMidi = OPEN_MIDI[5] + anchor;  // OPEN_MIDI[5] = 40 (low E)
+    const anchorPc   = anchorMidi % 12;
+    if (!scaleSet.has(anchorPc)) continue;
+
+    // Positions extend 1 fret below the anchor: on many strings the scale notes
+    // fall on a fret lower than the anchor due to guitar tuning intervals.
+    const winMin = Math.max(0, anchor - 1);
+    const winMax = anchor + 3;  // covers the standard 4-fret hand position
+
+    const allPos = new Map();
+    const curPos = new Set();
+
+    for (let s = 0; s < 6; s++) {
+      for (let f = winMin; f <= winMax; f++) {
+        const pc = ((OPEN_MIDI[s] + f) % 12 + 12) % 12;
+        if (!scaleSet.has(pc)) continue;
+        const key = `${s},${f}`;
+        allPos.set(key, true);
+        if (pc === rootPc) curPos.add(key);
+      }
+    }
+
+    if (allPos.size === 0) continue;
+
+    const dispMin = winMin;        // diagram starts at the first search fret
+    const dispMax = winMax + 1;    // 1 fret of right padding
+    const cellW   = 42;
+    const labelW  = 26, padH = 36;
+    const boardW  = (dispMax - dispMin + 1) * cellW;
+    const diagW   = 2 * padH + labelW + boardW;
+    const label = `Pos ${diagrams.length + 1}`;
+    diagrams.push({ allPos, curPos, dispMin, dispMax, boardW, diagW, label });
+  }
+  return diagrams;
+}
+
+/**
+ * Find all open triad voicings (1-5-3 pitch order, third one octave higher)
+ * for the current scaleKey and the given quality ('major' | 'minor').
+ * Searches all 3-string combinations (string-span ≤ 3) within frets 0-12,
+ * fret span ≤ 4.  Root notes go into curPos (shown orange).
+ */
+/**
+ * Compute open triad voicings for a given quality and inversion.
+ *
+ * Open voicing always spans more than an octave (the "spread" is achieved by
+ * dropping the middle voice of a closed triad down an octave):
+ *   root position : 1 – 5 – 3   (root bass, fifth mid, third top)
+ *   1st inversion : 3 – 1 – 5   (third bass, root mid, fifth top)
+ *   2nd inversion : 5 – 3 – 1   (fifth bass, third mid, root top)
+ *
+ * The root note is always highlighted orange regardless of where it falls.
+ */
+function computeOpenTriads(quality, inversion) {
+  const rootPc  = NOTE_NAMES.indexOf(state.scaleKey);
+  if (rootPc < 0) return [];
+  const fifthPc = (rootPc + 7) % 12;
+  const thirdPc = quality === 'major' ? (rootPc + 4) % 12 : (rootPc + 3) % 12;
+
+  // Assign each voice to a pitch class according to the inversion
+  let bassNote, midNote, topNote;
+  if      (inversion === 'root')   [bassNote, midNote, topNote] = [rootPc,  fifthPc, thirdPc];
+  else if (inversion === 'first')  [bassNote, midNote, topNote] = [thirdPc, rootPc,  fifthPc];
+  else                             [bassNote, midNote, topNote] = [fifthPc, thirdPc, rootPc];
+
+  const MAX_SPAN = 4;
+  const MAX_FRET = 12;
+  const cellW = 42, labelW = 26, padH = 36;
+  const shapes = [];
+
+  // sb = bass string (highest index = lowest pitch)
+  // sm = middle string, st = top string (lowest index = highest pitch)
+  for (let sb = 5; sb >= 2; sb--) {
+    for (let sm = sb - 1; sm >= 1; sm--) {
+      for (let st = sm - 1; st >= 0; st--) {
+        if (sb - st > 3) continue;
+
+        for (let fb = 0; fb <= MAX_FRET; fb++) {
+          if ((OPEN_MIDI[sb] + fb) % 12 !== bassNote) continue;
+          const mB = OPEN_MIDI[sb] + fb;
+
+          for (let fm = 0; fm <= MAX_FRET; fm++) {
+            if ((OPEN_MIDI[sm] + fm) % 12 !== midNote) continue;
+            const mM = OPEN_MIDI[sm] + fm;
+            if (mM <= mB) continue;
+
+            for (let ft = 0; ft <= MAX_FRET; ft++) {
+              if ((OPEN_MIDI[st] + ft) % 12 !== topNote) continue;
+              const mT = OPEN_MIDI[st] + ft;
+              if (mT <= mM) continue;
+
+              const minF = Math.min(fb, fm, ft);
+              const maxF = Math.max(fb, fm, ft);
+              if (maxF - minF > MAX_SPAN) continue;
+
+              const allPos = new Map();
+              const curPos = new Set();
+              allPos.set(`${sb},${fb}`, true);
+              allPos.set(`${sm},${fm}`, true);
+              allPos.set(`${st},${ft}`, true);
+              // Highlight whichever voice carries the root
+              if (bassNote === rootPc) curPos.add(`${sb},${fb}`);
+              if (midNote  === rootPc) curPos.add(`${sm},${fm}`);
+              if (topNote  === rootPc) curPos.add(`${st},${ft}`);
+
+              const dispMin = minF === 0 ? 0 : minF - 1;
+              const dispMax = maxF + 1;
+              const boardW  = (dispMax - dispMin + 1) * cellW;
+              const diagW   = 2 * padH + labelW + boardW;
+              const label   = `${STRINGS[sb]}-${STRINGS[sm]}-${STRINGS[st]}`;
+              shapes.push({ allPos, curPos, dispMin, dispMax, boardW, diagW, label, bassFret: fb });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Group same-position alternatives together (same bass fret), main voicing first
+  shapes.sort((a, b) =>
+    a.bassFret !== b.bassFret ? a.bassFret - b.bassFret : b.dispMin - a.dispMin
+  );
+  return shapes;
+}
+
+/** Pack a flat array of diagram descriptors into rows given a max width. */
+function packRows(diagrams, wrapW, diagGap) {
+  const rows = [];
+  let row = [], rowUsed = 0;
+  for (const d of diagrams) {
+    const gap    = row.length ? diagGap : 0;
+    const needed = d.diagW + gap;
+    if (row.length && rowUsed + needed > wrapW) {
+      rows.push(row); row = [d]; rowUsed = d.diagW;
+    } else {
+      row.push(d); rowUsed += needed;
+    }
+  }
+  if (row.length) rows.push(row);
+  return rows;
+}
+
+/** Height of a single diagram (accounting for optional caption). */
+function diagHeight(diag) {
+  const strGap = 26, padV = 36, numH = 20, boardH = 5 * strGap;
+  const captionH = diag.label ? 18 : 0;
+  return captionH + padV + boardH + numH + padV;
+}
+
+/** Height of a set of rows. */
+function rowsHeight(rows, rowGap) {
+  if (!rows.length) return 0;
+  return rows.reduce((h, row) => h + Math.max(...row.map(diagHeight)), 0)
+       + (rows.length - 1) * rowGap;
+}
+
+/** Build tab note diagram descriptors (one per End Set group with notes). */
+function buildTabDiagrams() {
+  const cellW = 42, labelW = 26, padH = 36;
+  const groups = [];
+  let cur = [];
+  state.columns.forEach((col, ci) => {
+    if (col._break) { if (cur.length) { groups.push(cur); cur = []; } }
+    else            { cur.push({ col, ci }); }
+  });
+  if (cur.length) groups.push(cur);
+
+  const diags = [];
+  for (const group of groups) {
+    const allPos = new Map();
+    const curPos = new Set();
+    let minFret = Infinity, maxFret = -Infinity;
+    for (const { col, ci } of group) {
+      if (col._barline) continue;
+      for (let s = 0; s < 6; s++) {
+        const fret = col[s];
+        if (fret === undefined) continue;
+        const key = `${s},${fret}`;
+        allPos.set(key, true);
+        if (ci === state.currentCol) curPos.add(key);
+        if (fret < minFret) minFret = fret;
+        if (fret > maxFret) maxFret = fret;
+      }
+    }
+    if (!isFinite(minFret)) continue;
+    const dispMin = minFret === 0 ? 0 : Math.max(0, minFret - 1);
+    const dispMax = maxFret + 1;
+    const boardW  = (dispMax - dispMin + 1) * cellW;
+    const diagW   = 2 * padH + labelW + boardW;
+    diags.push({ allPos, curPos, dispMin, dispMax, boardW, diagW });
+  }
+  return diags;
+}
+
+function renderScaleDiagram() {
+  const tc    = document.getElementById('tab-canvas');
+  const wrap  = tc.parentElement;
+  const dpr   = window.devicePixelRatio || 1;
+  const wrapW = wrap.clientWidth;
+  if (wrapW === 0) return;
+
+  const padV = 36, strGap = 26, numH = 20;
+  const baseDiagH  = padV + 5 * strGap + numH + padV;
+  const diagGap    = 24;
+  const rowGap     = 16;
+  const sectionGap = 36;
+  const labelH     = 20;
+
+  // Build sections in display order
+  const sections = [];
+
+  if (state.scaleDrawn) {
+    const sd = computeScalePositions();
+    if (sd.length) sections.push({
+      diags: sd,
+      title: `${state.scaleKey} ${state.scaleType} — scale positions`,
+      color: CUR_INK,
+    });
+  }
+
+  if (state.triadDrawn) {
+    const k = state.scaleKey;
+    const INVS = [
+      { inv: 'root',   tag: '1-5-3  root position' },
+      { inv: 'first',  tag: '3-1-5  1st inversion'  },
+      { inv: 'second', tag: '5-3-1  2nd inversion'  },
+    ];
+    for (const { inv, tag } of INVS) {
+      const d = computeOpenTriads('major', inv);
+      if (d.length) sections.push({ diags: d, title: `${k} major  —  ${tag}`, color: '#5090d0' });
+    }
+    for (const { inv, tag } of INVS) {
+      const d = computeOpenTriads('minor', inv);
+      if (d.length) sections.push({ diags: d, title: `${k} minor  —  ${tag}`, color: '#60a080' });
+    }
+  }
+
+  const tabDiags = buildTabDiagrams();
+  if (tabDiags.length) sections.push({
+    diags: tabDiags,
+    title: 'Notes in tab',
+    color: INK_DIM,
+  });
+
+  if (!sections.length) {
+    tc.width  = Math.round(wrapW * dpr); tc.height = Math.round(baseDiagH * dpr);
+    tc.style.width = wrapW + 'px'; tc.style.height = baseDiagH + 'px';
+    const cx = tc.getContext('2d'); cx.scale(dpr, dpr);
+    cx.fillStyle = PAPER; cx.fillRect(0, 0, wrapW, baseDiagH);
+    return;
+  }
+
+  // Pack each section into rows and compute its total height
+  for (const s of sections) {
+    s.rows = packRows(s.diags, wrapW, diagGap);
+    s.h    = labelH + rowsHeight(s.rows, rowGap);
+    s.maxW = s.rows.reduce((mx, r) => {
+      return Math.max(mx, r.reduce((w, d, i) => w + d.diagW + (i ? diagGap : 0), 0));
+    }, 0);
+  }
+
+  const logW = Math.max(...sections.map(s => s.maxW), 200);
+  const logH = sections.reduce((h, s, i) => h + s.h + (i ? sectionGap : 0), 0);
+
+  tc.width  = Math.round(logW * dpr); tc.height = Math.round(logH * dpr);
+  tc.style.width = logW + 'px'; tc.style.height = logH + 'px';
+
+  const cx = tc.getContext('2d');
+  cx.scale(dpr, dpr);
+  cx.fillStyle = PAPER;
+  cx.fillRect(0, 0, logW, logH);
+
+  let oy = 0;
+  for (let si = 0; si < sections.length; si++) {
+    const s = sections[si];
+
+    cx.font = 'bold 13px sans-serif'; cx.fillStyle = s.color;
+    cx.textAlign = 'left'; cx.textBaseline = 'top';
+    cx.fillText(s.title, 0, oy);
+    oy += labelH;
+
+    for (const row of s.rows) {
+      let ox = 0;
+      const rowH = Math.max(...row.map(diagHeight));
+      for (const diag of row) {
+        drawSingleScaleDiagram(cx, diag, ox, oy);
+        ox += diag.diagW + diagGap;
+      }
+      oy += rowH + rowGap;
+    }
+    oy -= rowGap; // remove trailing row gap
+    if (si < sections.length - 1) oy += sectionGap;
+  }
+}
+
 function renderTab() {
+  if (state.viewMode === 'scale') { renderScaleDiagram(); return; }
   const tc          = document.getElementById('tab-canvas');
   const wrap        = tc.parentElement;
   const dpr         = window.devicePixelRatio || 1;
@@ -1443,6 +1897,8 @@ function drawTrebleClef(cx, left, staffTop, staffH) {
 
 function syncDurationUI() {
   const dur = state.columns[state.currentCol]._dur || 'quarter';
+  document.getElementById('dur-whole').classList.toggle('active',   dur === 'whole');
+  document.getElementById('dur-half').classList.toggle('active',    dur === 'half');
   document.getElementById('dur-quarter').classList.toggle('active', dur === 'quarter');
   document.getElementById('dur-8th').classList.toggle('active',     dur === 'eighth');
   document.getElementById('dur-16th').classList.toggle('active',    dur === 'sixteenth');
@@ -1466,6 +1922,24 @@ function syncTripletUI() {
 
 function syncAutoAdvanceUI() {
   document.getElementById('btn-auto-advance').classList.toggle('auto-advance-active', state.autoAdvance);
+}
+
+function syncViewUI() {
+  const isScale = state.viewMode === 'scale';
+  document.getElementById('btn-scale-view').classList.toggle('active', isScale);
+  document.getElementById('btn-scale-view').textContent = isScale ? 'Tab View' : 'Scale View';
+  const scaleCtrl = document.getElementById('scale-ctrl');
+  if (scaleCtrl) scaleCtrl.style.display = isScale ? 'contents' : 'none';
+  const btnDraw = document.getElementById('btn-draw-scale');
+  if (btnDraw) {
+    btnDraw.classList.toggle('draw-scale-active', state.scaleDrawn);
+    btnDraw.textContent = state.scaleDrawn ? 'Hide Scale' : 'Draw Scale';
+  }
+  const btnTriad = document.getElementById('btn-draw-triads');
+  if (btnTriad) {
+    btnTriad.classList.toggle('draw-triad-active', state.triadDrawn);
+    btnTriad.textContent = state.triadDrawn ? 'Hide Triads' : 'Open Triads';
+  }
 }
 
 function syncBendUI() {
@@ -1497,6 +1971,7 @@ function refresh() {
   syncEightvaUI();
   syncTripletUI();
   syncAutoAdvanceUI();
+  syncViewUI();
 
   document.getElementById('col-num').textContent   = state.currentCol + 1;
   document.getElementById('col-total').textContent = state.columns.length;
@@ -1675,6 +2150,32 @@ document.getElementById('btn-vib').addEventListener('click', toggleVib);
 document.getElementById('btn-8va').addEventListener('click', toggleEightva);
 document.getElementById('btn-triplet').addEventListener('click', toggleTriplet);
 document.getElementById('btn-auto-advance').addEventListener('click', toggleAutoAdvance);
+document.getElementById('btn-scale-view').addEventListener('click', () => {
+  state.viewMode = state.viewMode === 'scale' ? 'tab' : 'scale';
+  refresh();
+});
+
+document.getElementById('btn-draw-scale').addEventListener('click', () => {
+  state.scaleDrawn = !state.scaleDrawn;
+  refresh();
+});
+
+document.getElementById('btn-draw-triads').addEventListener('click', () => {
+  state.triadDrawn = !state.triadDrawn;
+  refresh();
+});
+
+document.getElementById('scale-key-select').addEventListener('change', e => {
+  state.scaleKey = e.target.value;
+  if (state.scaleDrawn) refresh();
+  else syncViewUI();
+});
+
+document.getElementById('scale-type-select').addEventListener('change', e => {
+  state.scaleType = e.target.value;
+  if (state.scaleDrawn) refresh();
+  else syncViewUI();
+});
 document.getElementById('btn-del').addEventListener('click', deleteColumn);
 document.getElementById('btn-clear-col').addEventListener('click', clearColumn);
 document.getElementById('btn-clear-all').addEventListener('click', clearAll);
@@ -1764,7 +2265,8 @@ function midiToFreq(midi) {
 /** Duration of one column in seconds given the current BPM. */
 function colDurSec(col, beatSec) {
   const dur  = col._dur || 'quarter';
-  const base = dur === 'quarter' ? beatSec : dur === 'eighth' ? beatSec / 2 : beatSec / 4;
+  const base = dur === 'whole' ? beatSec * 4 : dur === 'half' ? beatSec * 2 :
+               dur === 'quarter' ? beatSec : dur === 'eighth' ? beatSec / 2 : beatSec / 4;
   return col._triplet ? base * 2 / 3 : base;
 }
 
@@ -1893,7 +2395,7 @@ document.getElementById('btn-stop').addEventListener('click', stopPlayback);
 
 // ─── Duration selector ────────────────────────────────────────────────────────
 
-[['dur-quarter', 'quarter'], ['dur-8th', 'eighth'], ['dur-16th', 'sixteenth']].forEach(([id, dur]) => {
+[['dur-whole', 'whole'], ['dur-half', 'half'], ['dur-quarter', 'quarter'], ['dur-8th', 'eighth'], ['dur-16th', 'sixteenth']].forEach(([id, dur]) => {
   document.getElementById(id).addEventListener('click', () => {
     state.selectedDur = dur;
     state.columns[state.currentCol]._dur = dur;
