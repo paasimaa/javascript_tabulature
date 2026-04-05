@@ -56,7 +56,13 @@ const state = {
   scaleKey:     'A',                  // root note for scale overlay
   scaleType:    'Minor Pentatonic',   // key into SCALES
   scaleDrawn:   false,                // whether to show scale position diagrams
-  triadDrawn:   false,                // whether to show open triad diagrams
+  triadDrawn:      false,              // whether to show open triad diagrams
+  triadPairDrawn:  false,              // whether to show triad pair diagrams
+  triadPair1Root:  'A',               // root of triad 1
+  triadPair1Qual:  'major',           // 'major' | 'minor' for triad 1
+  triadPair2Root:  'B',               // root of triad 2
+  triadPair2Qual:  'major',           // 'major' | 'minor' for triad 2
+  zoom:            1.0,               // canvas zoom factor (0.5 – 3.0)
 };
 
 // ─── Canvas & Layout ──────────────────────────────────────────────────────────
@@ -345,9 +351,10 @@ const INK    = '#111111';
 const INK_DIM = '#aaaaaa';
 const CUR_BG  = 'rgba(210, 80, 20, 0.06)';
 const CUR_INK = '#c04010';
+const SEC_INK = '#3080c0';
 
 function tabColW(col) {
-  if (col._break)   return 0;
+  if (col._break || col._sysbreak) return 0;
   if (col._barline) return 12;
   const hasTwoDigit = Object.entries(col).some(([k, v]) => !k.startsWith('_') && String(v).length >= 2);
   const base = hasTwoDigit ? TL.colW2 : TL.colW1;
@@ -563,7 +570,7 @@ function drawMusicNotes(cx, col, noteCx, botY, lineH, isCurrent) {
     const avgStep  = notes.reduce((a, n) => a + n.step, 0) / notes.length;
     const stemUp   = avgStep <= 4;
     const stemXOff = stemUp ? nhW * 0.43 : -nhW * 0.43;
-    const stemLen  = lineH * 3.5;
+    const stemLen  = lineH * 2.8;
     const minStep  = Math.min(...notes.map(n => n.step));
     const maxStep  = Math.max(...notes.map(n => n.step));
     const anchorY  = stepY(stemUp ? minStep : maxStep, botY, lineH);
@@ -836,7 +843,7 @@ function renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw) {
     const item     = colData[i];
 
     // ── Group-break / barline column (breaks beam grouping) ─────────
-    if (item.col._break || item.col._barline) { i++; continue; }
+    if (item.col._break || item.col._sysbreak || item.col._barline) { i++; continue; }
 
     // ── Rest column ─────────────────────────────────────────────────
     if (item.col._rest) {
@@ -855,7 +862,7 @@ function renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw) {
       while (i < colData.length &&
              colData[i].dur === groupDur &&
              !!colData[i].col._triplet === isTriplet &&
-             !colData[i].col._break && !colData[i].col._barline && !colData[i].col._rest &&
+             !colData[i].col._break && !colData[i].col._sysbreak && !colData[i].col._barline && !colData[i].col._rest &&
              getColNotes(colData[i].col).length > 0) i++;
       const run = colData.slice(start, i);
       if (run.length >= 2) {
@@ -880,7 +887,7 @@ function renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw) {
       while (i < colData.length &&
              colData[i].dur === 'quarter' &&
              colData[i].col._triplet &&
-             !colData[i].col._break && !colData[i].col._barline && !colData[i].col._rest &&
+             !colData[i].col._break && !colData[i].col._sysbreak && !colData[i].col._barline && !colData[i].col._rest &&
              getColNotes(colData[i].col).length > 0) i++;
       const run = colData.slice(start, i);
       run.forEach(r => drawMusicNotes(cx, r.col, r.ncx, botY, lineH, r.isCur));
@@ -1158,12 +1165,13 @@ function drawSingleScaleDiagram(cx, diag, ox, oy) {
   for (const key of allPos.keys()) {
     const [s, fret] = key.split(',').map(Number);
     const isCur = curPos.has(key);
+    const isSec = diag.secPos && diag.secPos.has(key);
     const dx = dotCx(fret), dy = strY(s);
     const pc   = ((OPEN_MIDI[s] + fret) % 12 + 12) % 12;
     const name = NOTE_NAMES[pc];
 
     cx.beginPath(); cx.arc(dx, dy, dotR, 0, Math.PI * 2);
-    cx.fillStyle = isCur ? CUR_INK : INK; cx.fill();
+    cx.fillStyle = isCur ? CUR_INK : isSec ? SEC_INK : INK; cx.fill();
 
     cx.fillStyle = PAPER;
     cx.font = `bold ${name.length > 1 ? Math.max(6, dotR * 0.72) : Math.max(7, dotR * 0.85)}px sans-serif`;
@@ -1313,6 +1321,67 @@ function computeOpenTriads(quality, inversion) {
   return shapes;
 }
 
+/**
+ * Compute fretboard position diagrams for a triad pair.
+ * T1 notes go into curPos (orange), T2 notes into secPos (blue).
+ * Returns { diags, valid } — valid=false if the two triads share a note.
+ */
+function computeTriadPairPositions() {
+  const r1 = NOTE_NAMES.indexOf(state.triadPair1Root);
+  const r2 = NOTE_NAMES.indexOf(state.triadPair2Root);
+  if (r1 < 0 || r2 < 0) return { diags: [], valid: false };
+
+  const triadPcs = (root, qual) => {
+    const third = qual === 'major' ? (root + 4) % 12 : (root + 3) % 12;
+    return new Set([root, (root + 7) % 12, third]);
+  };
+  const t1 = triadPcs(r1, state.triadPair1Qual);
+  const t2 = triadPcs(r2, state.triadPair2Qual);
+
+  // Validate: no shared pitch classes
+  for (const pc of t1) if (t2.has(pc)) return { diags: [], valid: false };
+
+  const cellW = 42, labelW = 26, padH = 36;
+  const diagrams = [];
+
+  for (let anchor = 0; anchor <= 11; anchor++) {
+    const anchorPc = (OPEN_MIDI[5] + anchor) % 12;
+    if (!t1.has(anchorPc) && !t2.has(anchorPc)) continue;
+
+    const winMin = Math.max(0, anchor - 1);
+    const winMax = anchor + 3;
+
+    const allPos = new Map();
+    const curPos = new Set();  // T1 = orange
+    const secPos = new Set();  // T2 = blue
+
+    for (let s = 0; s < 6; s++) {
+      for (let f = winMin; f <= winMax; f++) {
+        const pc = (OPEN_MIDI[s] + f) % 12;
+        const key = `${s},${f}`;
+        if (t1.has(pc)) {
+          allPos.set(key, true); curPos.add(key);
+        } else if (t2.has(pc)) {
+          allPos.set(key, true); secPos.add(key);
+        }
+      }
+    }
+
+    if (!allPos.size) continue;
+
+    // Skip positions that contain open-string notes (fret 0) — awkward to practise
+    const hasOpen = [...allPos.keys()].some(k => k.split(',')[1] === '0');
+    if (hasOpen) continue;
+
+    const dispMin = winMin;
+    const dispMax = winMax + 1;
+    const boardW  = (dispMax - dispMin + 1) * cellW;
+    const diagW   = 2 * padH + labelW + boardW;
+    diagrams.push({ allPos, curPos, secPos, dispMin, dispMax, boardW, diagW });
+  }
+  return { diags: diagrams, valid: true };
+}
+
 /** Pack a flat array of diagram descriptors into rows given a max width. */
 function packRows(diagrams, wrapW, diagGap) {
   const rows = [];
@@ -1425,6 +1494,24 @@ function renderScaleDiagram() {
     }
   }
 
+  if (state.triadPairDrawn) {
+    const { diags, valid } = computeTriadPairPositions();
+    if (!valid) {
+      sections.push({
+        diags: [],
+        title: `⚠  ${state.triadPair1Root} ${state.triadPair1Qual}  +  ${state.triadPair2Root} ${state.triadPair2Qual}  — triads share a note, choose a different pair`,
+        color: '#c03030',
+        _error: true,
+      });
+    } else if (diags.length) {
+      sections.push({
+        diags,
+        title: `${state.triadPair1Root} ${state.triadPair1Qual}  +  ${state.triadPair2Root} ${state.triadPair2Qual}  — triad pair positions  (orange = T1, blue = T2)`,
+        color: CUR_INK,
+      });
+    }
+  }
+
   const tabDiags = buildTabDiagrams();
   if (tabDiags.length) sections.push({
     diags: tabDiags,
@@ -1493,37 +1580,63 @@ function renderTab() {
   const musicStaffH = TL.musicLineH * 4;                               // 32px
   const sysH        = TL.padV + musicStaffH + TL.staveGap + tabStaffH + TL.padV;
 
-  const logW = wrap.clientWidth;
+  const zoom = state.zoom;
+  const logW = wrap.clientWidth / zoom;
   if (logW === 0) return;
 
   const cw         = state.columns.map(tabColW);
   const noteAreaW  = logW - 2 * TL.padH - TL.clefW - TL.lead - TL.trail;
 
-  // Pack columns into systems greedily
-  const systems = [];
-  let i = 0;
-  while (i < state.columns.length) {
-    const sys = { start: i, indices: [] };
-    let used  = 0;
-    while (i < state.columns.length) {
-      if (used + cw[i] > noteAreaW && sys.indices.length > 0) break;
-      used += cw[i];
-      sys.indices.push(i);
-      i++;
+  // Pack columns into systems keeping whole measures together (never split a measure across lines)
+  // Step 1: group columns into measures and sysbreak markers
+  const packUnits = [];
+  {
+    let m = { type: 'measure', indices: [], width: 0 };
+    for (let i = 0; i < state.columns.length; i++) {
+      const col = state.columns[i];
+      if (col._sysbreak) {
+        if (m.indices.length > 0) { packUnits.push(m); m = { type: 'measure', indices: [], width: 0 }; }
+        packUnits.push({ type: 'sysbreak' });
+        continue;
+      }
+      m.indices.push(i);
+      m.width += cw[i];
+      if (col._barline) { packUnits.push(m); m = { type: 'measure', indices: [], width: 0 }; }
     }
-    systems.push(sys);
+    if (m.indices.length > 0) packUnits.push(m);
   }
+
+  // Step 2: pack whole measures into systems
+  const systems = [];
+  {
+    let sys = { indices: [] };
+    for (const unit of packUnits) {
+      if (unit.type === 'sysbreak') {
+        if (sys.indices.length > 0) systems.push(sys);
+        sys = { indices: [] };
+        continue;
+      }
+      const usedW = sys.indices.reduce((s, ci) => s + cw[ci], 0);
+      if (sys.indices.length > 0 && usedW + unit.width > noteAreaW) {
+        systems.push(sys);
+        sys = { indices: [] };
+      }
+      for (const ci of unit.indices) sys.indices.push(ci);
+    }
+    if (sys.indices.length > 0) systems.push(sys);
+  }
+  if (systems.length === 0) systems.push({ indices: [] });
 
   const logH = systems.length * sysH + 24;
 
-  // Size the canvas (HiDPI)
-  tc.width        = Math.round(logW * dpr);
-  tc.height       = Math.round(logH * dpr);
-  tc.style.width  = logW + 'px';
-  tc.style.height = logH + 'px';
+  // Size the canvas (HiDPI + zoom)
+  tc.width        = Math.round(logW * zoom * dpr);
+  tc.height       = Math.round(logH * zoom * dpr);
+  tc.style.width  = (logW * zoom) + 'px';
+  tc.style.height = (logH * zoom) + 'px';
 
   const cx = tc.getContext('2d');
-  cx.scale(dpr, dpr);
+  cx.scale(dpr * zoom, dpr * zoom);
 
   cx.fillStyle = PAPER;
   cx.fillRect(0, 0, logW, logH);
@@ -1533,7 +1646,7 @@ function renderTab() {
   const autoPick = {};
   let pickSeq = 0; // even = down, odd = up
   state.columns.forEach((col, ci) => {
-    if (col._barline || col._break) return;
+    if (col._barline || col._break || col._sysbreak) return;
     const hasNote = Object.keys(col).some(k => !k.startsWith('_'));
     if (!hasNote) return;                          // rest — no symbol
     if (col._tech || col._slide) return;           // H/P or slide — no auto symbol
@@ -1554,6 +1667,18 @@ function renderTab() {
     const staffX    = TL.padH + TL.clefW;
     const staffW    = logW - 2 * TL.padH - TL.clefW;
     const isLast    = si === systems.length - 1;
+    const sysStart  = sys.indices.length > 0 ? sys.indices[0] : 0;
+
+    // Spread note columns evenly across the note area for this system
+    const ew = {};
+    {
+      const barW    = sys.indices.reduce((s, ci) => s + (state.columns[ci]._barline ? cw[ci] : 0), 0);
+      const noteCis = sys.indices.filter(ci => cw[ci] > 0 && !state.columns[ci]._barline);
+      const evenW   = noteCis.length > 0 ? (noteAreaW - barW) / noteCis.length : 0;
+      sys.indices.forEach(ci => {
+        ew[ci] = state.columns[ci]._barline ? cw[ci] : cw[ci] === 0 ? 0 : evenW;
+      });
+    }
 
     // ── Music staff (5 lines) — start from left margin so clef sits on the lines
     cx.strokeStyle = INK;
@@ -1624,7 +1749,7 @@ function renderTab() {
     // ── Current-column highlight spans both staves ────────────────
     let noteX = staffX + TL.lead;
     sys.indices.forEach(ci => {
-      const w         = cw[ci];
+      const w         = ew[ci];
       const isCurrent = ci === state.currentCol;
 
       if (isCurrent) {
@@ -1642,7 +1767,7 @@ function renderTab() {
     noteX = staffX + TL.lead;
     sys.indices.forEach(ci => {
       const col    = state.columns[ci];
-      const w      = cw[ci];
+      const w      = ew[ci];
       const noteCx = noteX + w / 2;
       const isCur  = ci === state.currentCol;
 
@@ -1677,8 +1802,8 @@ function renderTab() {
     const colCx = {};
     noteX = staffX + TL.lead;
     sys.indices.forEach(ci => {
-      colCx[ci] = noteX + cw[ci] / 2;
-      noteX += cw[ci];
+      colCx[ci] = noteX + ew[ci] / 2;
+      noteX += ew[ci];
     });
 
     // ── Bar lines ─────────────────────────────────────────────────
@@ -1705,7 +1830,7 @@ function renderTab() {
 
       // Register hit target for all pickable columns (including 'none' state — invisible but clickable)
       const hasNote = Object.keys(col).some(k => !k.startsWith('_'));
-      if (!col._barline && !col._break && !col._tech && !col._slide && hasNote) {
+      if (!col._barline && !col._break && !col._sysbreak && !col._tech && !col._slide && hasNote) {
         pickHitTargets.push({ ci, x: colCx[ci], y: pickY, shown: pick || null });
       }
     });
@@ -1718,7 +1843,7 @@ function renderTab() {
       // Find nearest previous non-break/non-barline column
       let prevCi = -1;
       for (let k = ci - 1; k >= 0; k--) {
-        if (!state.columns[k]._break && !state.columns[k]._barline) { prevCi = k; break; }
+        if (!state.columns[k]._break && !state.columns[k]._sysbreak && !state.columns[k]._barline) { prevCi = k; break; }
       }
       if (prevCi < 0 || colCx[prevCi] === undefined) return;  // no prev or cross-system
 
@@ -1751,7 +1876,7 @@ function renderTab() {
       // Find nearest previous non-break/non-barline column
       let prevCi = -1;
       for (let k = ci - 1; k >= 0; k--) {
-        if (!state.columns[k]._break && !state.columns[k]._barline) { prevCi = k; break; }
+        if (!state.columns[k]._break && !state.columns[k]._sysbreak && !state.columns[k]._barline) { prevCi = k; break; }
       }
       if (prevCi < 0 || colCx[prevCi] === undefined) return;
 
@@ -1774,8 +1899,8 @@ function renderTab() {
       const y1    = tabTop + dstString * TL.lineH;
 
       // Edge offsets: half the column width minus a small gap
-      const off0  = cw[prevCi] / 2 - 4;
-      const off1  = cw[ci]     / 2 - 4;
+      const off0  = ew[prevCi] / 2 - 4;
+      const off1  = ew[ci]     / 2 - 4;
 
       drawSlide(cx, x0, y0, x1, y1, off0, off1, ink);
     });
@@ -1825,8 +1950,8 @@ function renderTab() {
 
       const ciFirst = eightvaIndices[0];
       const ciLast  = eightvaIndices[eightvaIndices.length - 1];
-      const x0      = colCx[ciFirst] - cw[ciFirst] / 2;
-      const x1      = colCx[ciLast]  + cw[ciLast]  / 2;
+      const x0      = colCx[ciFirst] - ew[ciFirst] / 2;
+      const x1      = colCx[ciLast]  + ew[ciLast]  / 2;
 
       // Does 8va start on this row (no _8va column before this row)?
       const isRowStart = !sys.indices.some(ci => ci < ciFirst && state.columns[ci - 1]?._8va) &&
@@ -1861,7 +1986,7 @@ function renderTab() {
     cx.setLineDash([]);
 
     // ── Music notes ───────────────────────────────────────────────
-    renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, cw);
+    renderMusicNotes(cx, sys, staffX, musicTop, musicStaffH, ew);
 
     // ── System-continuation label ─────────────────────────────────
     if (si > 0) {
@@ -1869,7 +1994,7 @@ function renderTab() {
       cx.fillStyle    = INK_DIM;
       cx.textAlign    = 'right';
       cx.textBaseline = 'top';
-      cx.fillText(`col ${sys.start + 1}–`, staffX + staffW, tabTop + tabStaffH + 5);
+      cx.fillText(`col ${sysStart + 1}–`, staffX + staffW, tabTop + tabStaffH + 5);
     }
   });
 }
@@ -1940,6 +2065,13 @@ function syncViewUI() {
     btnTriad.classList.toggle('draw-triad-active', state.triadDrawn);
     btnTriad.textContent = state.triadDrawn ? 'Hide Triads' : 'Open Triads';
   }
+  const btnPair = document.getElementById('btn-draw-triads-pair');
+  if (btnPair) {
+    btnPair.classList.toggle('draw-triad-pair-active', state.triadPairDrawn);
+    btnPair.textContent = state.triadPairDrawn ? 'Hide Pairs' : 'Triad Pairs';
+  }
+  const pairCtrl = document.getElementById('triad-pair-ctrl');
+  if (pairCtrl) pairCtrl.style.display = (isScale && state.triadPairDrawn) ? 'contents' : 'none';
 }
 
 function syncBendUI() {
@@ -1986,13 +2118,13 @@ function refresh() {
 
 function goPrev() {
   let prev = state.currentCol - 1;
-  while (prev >= 0 && (state.columns[prev]._break || state.columns[prev]._barline)) prev--;
+  while (prev >= 0 && (state.columns[prev]._break || state.columns[prev]._sysbreak || state.columns[prev]._barline)) prev--;
   if (prev >= 0) { state.currentCol = prev; refresh(); }
 }
 
 function goNext() {
   let next = state.currentCol + 1;
-  while (next < state.columns.length && (state.columns[next]._break || state.columns[next]._barline)) next++;
+  while (next < state.columns.length && (state.columns[next]._break || state.columns[next]._sysbreak || state.columns[next]._barline)) next++;
   if (next < state.columns.length) { state.currentCol = next; refresh(); }
 }
 
@@ -2165,6 +2297,30 @@ document.getElementById('btn-draw-triads').addEventListener('click', () => {
   refresh();
 });
 
+document.getElementById('btn-draw-triads-pair').addEventListener('click', () => {
+  state.triadPairDrawn = !state.triadPairDrawn;
+  refresh();
+});
+
+document.getElementById('tp1-root-select').addEventListener('change', e => {
+  state.triadPair1Root = e.target.value;
+  if (state.triadPairDrawn) refresh(); else syncViewUI();
+});
+document.getElementById('tp1-qual-select').addEventListener('change', e => {
+  state.triadPair1Qual = e.target.value;
+  if (state.triadPairDrawn) refresh(); else syncViewUI();
+});
+document.getElementById('tp2-root-select').addEventListener('change', e => {
+  state.triadPair2Root = e.target.value;
+  if (state.triadPairDrawn) refresh(); else syncViewUI();
+});
+document.getElementById('tp2-qual-select').addEventListener('change', e => {
+  state.triadPair2Qual = e.target.value;
+  if (state.triadPairDrawn) refresh(); else syncViewUI();
+});
+
+document.getElementById('btn-tp-tab').addEventListener('click', generateTriadPairTab);
+
 document.getElementById('scale-key-select').addEventListener('change', e => {
   state.scaleKey = e.target.value;
   if (state.scaleDrawn) refresh();
@@ -2224,6 +2380,22 @@ document.getElementById('btn-sidetitle').addEventListener('click', () => {
   area.classList.add('visible');
   const isVisible = el.classList.toggle('visible');
   if (isVisible) focusAtEnd(el);
+});
+
+function updateZoomLabel() {
+  document.getElementById('zoom-label').textContent = Math.round(state.zoom * 100) + '%';
+}
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  state.zoom = Math.min(3.0, Math.round((state.zoom + 0.1) * 100) / 100);
+  updateZoomLabel();
+  renderTab();
+});
+
+document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  state.zoom = Math.max(0.5, Math.round((state.zoom - 0.1) * 100) / 100);
+  updateZoomLabel();
+  renderTab();
 });
 
 document.getElementById('btn-pdf').addEventListener('click', () => {
@@ -2329,7 +2501,7 @@ function startPlayback() {
   let t        = audioCtx.currentTime + 0.08;
 
   state.columns.forEach((col, ci) => {
-    if (col._break || col._barline) return;     // no time, no sound
+    if (col._break || col._sysbreak || col._barline) return;     // no time, no sound
     const dur = colDurSec(col, beatSec);
 
     if (!col._rest) {
@@ -2402,6 +2574,143 @@ document.getElementById('btn-stop').addEventListener('click', stopPlayback);
     refresh();
   });
 });
+
+// ─── Triad Pair Tab Generator ─────────────────────────────────────────────────
+
+function generateTriadPairTab() {
+  const r1 = NOTE_NAMES.indexOf(state.triadPair1Root);
+  const r2 = NOTE_NAMES.indexOf(state.triadPair2Root);
+  if (r1 < 0 || r2 < 0) return;
+
+  const triadPcs = (root, qual) => {
+    const third = qual === 'major' ? (root + 4) % 12 : (root + 3) % 12;
+    return new Set([root, (root + 7) % 12, third]);
+  };
+  const t1 = triadPcs(r1, state.triadPair1Qual);
+  const t2 = triadPcs(r2, state.triadPair2Qual);
+  for (const pc of t1) if (t2.has(pc)) return; // invalid pair
+
+  // Build a Map<pitch, [{s,f}]> keeping ALL string options for each pitch level.
+  // "pitch" here is just a number used to order notes low→high (fret + open string offset).
+  function buildPitchMap(notes) {
+    const m = new Map();
+    for (const n of notes) {
+      if (!m.has(n.pitch)) m.set(n.pitch, []);
+      m.get(n.pitch).push(n);
+    }
+    return m;
+  }
+
+  // Pick notes from an ordered list of pitch values, choosing at each step the
+  // string option closest to the previous note's string (avoids string skips).
+  function smoothPick(pitches, pitchMap, prevS) {
+    const result = [];
+    let curS = prevS;
+    for (const pitch of pitches) {
+      const opts = pitchMap.get(pitch);
+      if (!opts || !opts.length) continue;
+      const pick = curS == null
+        ? opts[0]
+        : opts.reduce((b, n) => Math.abs(n.s - curS) < Math.abs(b.s - curS) ? n : b);
+      result.push(pick);
+      curS = pick.s;
+    }
+    return result;
+  }
+
+  // Collect all valid positions (ascending anchor order)
+  const positions = [];
+  for (let anchor = 0; anchor <= 11; anchor++) {
+    const anchorPc = (OPEN_MIDI[5] + anchor) % 12;
+    if (!t1.has(anchorPc) && !t2.has(anchorPc)) continue;
+
+    const winMin = Math.max(0, anchor - 1);
+    const winMax = anchor + 3;
+
+    const t1Notes = [], t2Notes = [];
+    for (let s = 0; s < 6; s++) {
+      for (let f = winMin; f <= winMax; f++) {
+        const pc    = (OPEN_MIDI[s] + f) % 12;
+        const pitch = OPEN_MIDI[s] + f;   // numeric pitch level for ordering notes
+        if (t1.has(pc)) t1Notes.push({ s, f, pitch });
+        else if (t2.has(pc)) t2Notes.push({ s, f, pitch });
+      }
+    }
+    if ([...t1Notes, ...t2Notes].some(n => n.f === 0)) continue;
+
+    const t1Map     = buildPitchMap(t1Notes);
+    const t2Map     = buildPitchMap(t2Notes);
+    const t1Pitches = [...t1Map.keys()].sort((a, b) => a - b);
+    const t2Pitches = [...t2Map.keys()].sort((a, b) => a - b);
+    if (t1Pitches.length < 3 || t2Pitches.length < 3) continue;
+
+    positions.push({ t1Map, t2Map, t1Pitches, t2Pitches });
+  }
+
+  const cols = [];
+  let groupCount = 0;
+
+  function emitGroup(notes) {
+    for (const n of notes) {
+      const col = { _dur: 'eighth', _pick: 'none', _triplet: true };
+      col[n.s] = n.f;
+      cols.push(col);
+    }
+    cols.push({ _break: true }); // end beam after every group of 3
+    if (++groupCount % 4 === 0) cols.push({ _barline: true });
+  }
+
+  // For each position: ascending (T1 up, T2 down) then descending (T1 down, T2 up)
+  for (let pi = 0; pi < positions.length; pi++) {
+    if (pi > 0) cols.push({ _sysbreak: true });
+    groupCount = 0;  // each position starts a fresh measure count
+    const { t1Map, t2Map, t1Pitches, t2Pitches } = positions[pi];
+    const t1PitchesDesc = [...t1Pitches].reverse();
+
+    // --- Ascending: T1 up 3, T2 down from just above T1's top note ---
+    let prevS = null;
+    for (let k = 0; k + 2 < t1Pitches.length; k++) {
+      const t1group    = smoothPick(t1Pitches.slice(k, k + 3), t1Map, prevS);
+      if (t1group.length < 3) continue;
+      const t1endPitch = t1group[2].pitch;
+      let j = -1;
+      for (let i = 0; i < t2Pitches.length; i++) {
+        if (t2Pitches[i] > t1endPitch) { j = i; break; }
+      }
+      if (j < 2) continue;
+      const t2group = smoothPick([t2Pitches[j], t2Pitches[j-1], t2Pitches[j-2]], t2Map, t1group[2].s);
+      if (t2group.length < 3) continue;
+      emitGroup(t1group);
+      prevS = t2group[2].s;
+      emitGroup(t2group);
+    }
+
+    // --- Descending: T1 down 3, T2 up from just below T1's lowest note ---
+    prevS = null;
+    for (let k = 0; k + 2 < t1PitchesDesc.length; k++) {
+      const t1group    = smoothPick(t1PitchesDesc.slice(k, k + 3), t1Map, prevS);
+      if (t1group.length < 3) continue;
+      const t1endPitch = t1group[2].pitch;
+      let j = -1;
+      for (let i = 0; i < t2Pitches.length && t2Pitches[i] < t1endPitch; i++) j = i;
+      if (j < 0 || j + 2 >= t2Pitches.length) continue;
+      const t2group = smoothPick(t2Pitches.slice(j, j + 3), t2Map, t1group[2].s);
+      if (t2group.length < 3) continue;
+      emitGroup(t1group);
+      prevS = t2group[2].s;
+      emitGroup(t2group);
+    }
+  }
+
+  if (!cols.length) return;
+  if (cols[cols.length - 1]._barline) cols.pop();
+
+  state.columns    = cols.length ? cols : [{ _dur: 'quarter' }];
+  state.currentCol = 0;
+  state.viewMode   = 'tab';
+  syncViewUI();
+  refresh();
+}
 
 // ─── EJ Lick Generator ────────────────────────────────────────────────────────
 

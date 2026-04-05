@@ -53,7 +53,7 @@
       </div>
 
       <div class="ctrl-group generate">
-        <button id="btn-ej-lick" title="Generate a random Eric Johnson style Em pentatonic lick">&#9881; EJ Lick</button>
+        <button id="btn-ej-lick" title="Generate a random Eric Johnson style Em pentatonic lick" style="display:none">&#9881; EJ Lick</button>
       </div>
 
       <div class="ctrl-group export">
@@ -129,6 +129,32 @@
           </select>
           <button id="btn-draw-scale" class="view-toggle-btn" title="Show scale position diagrams">Draw Scale</button>
           <button id="btn-draw-triads" class="view-toggle-btn" title="Show open triad voicings (1-5-3) for major and minor">Open Triads</button>
+          <button id="btn-draw-triads-pair" class="view-toggle-btn" title="Show triad pair positions and generate tab">Triad Pairs</button>
+          <span id="triad-pair-ctrl" style="display:none">
+            <select id="tp1-root-select" title="Triad 1 root">
+              <option>C</option><option>C♯</option><option>D</option><option>D♯</option>
+              <option>E</option><option>F</option><option>F♯</option><option>G</option>
+              <option>G♯</option><option selected>A</option><option>A♯</option><option>B</option>
+            </select>
+            <select id="tp1-qual-select" title="Triad 1 quality">
+              <option value="major">maj</option><option value="minor">min</option>
+            </select>
+            <span class="tp-plus">+</span>
+            <select id="tp2-root-select" title="Triad 2 root">
+              <option>C</option><option>C♯</option><option>D</option><option>D♯</option>
+              <option>E</option><option>F</option><option>F♯</option><option>G</option>
+              <option>G♯</option><option>A</option><option>A♯</option><option selected>B</option>
+            </select>
+            <select id="tp2-qual-select" title="Triad 2 quality">
+              <option value="major">maj</option><option value="minor">min</option>
+            </select>
+            <button id="btn-tp-tab" class="view-toggle-btn" title="Generate tab for this triad pair">&#8594; Tab</button>
+          </span>
+        </span>
+        <span class="zoom-ctrl">
+          <button id="btn-zoom-out" class="view-toggle-btn" title="Zoom out">&#8722;</button>
+          <span id="zoom-label">100%</span>
+          <button id="btn-zoom-in" class="view-toggle-btn" title="Zoom in">+</button>
         </span>
         <span class="tab-hint">
           Click fretboard &rarr; place note &nbsp;|&nbsp; Enter &rarr; new column &nbsp;|&nbsp; &#8592;&#8594; &rarr; navigate
