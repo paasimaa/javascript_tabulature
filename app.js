@@ -1194,8 +1194,10 @@ function computeScalePositions() {
   const scaleSet = new Set(intervals.map(i => (rootPc + i) % 12));
 
   const diagrams = [];
-  // Find anchor frets on low E string (string index 5 in OPEN_MIDI = low E)
-  for (let anchor = 0; anchor <= 11; anchor++) {
+  const targetCount = intervals.length; // 5 for pentatonic, 7 for diatonic, etc.
+  // Find anchor frets on low E string (string index 5 in OPEN_MIDI = low E).
+  // Scan until we have one position per scale degree (stops at the right count for any key/scale).
+  for (let anchor = 0; anchor <= 24 && diagrams.length < targetCount; anchor++) {
     const anchorMidi = OPEN_MIDI[5] + anchor;  // OPEN_MIDI[5] = 40 (low E)
     const anchorPc   = anchorMidi % 12;
     if (!scaleSet.has(anchorPc)) continue;
@@ -1219,6 +1221,10 @@ function computeScalePositions() {
     }
 
     if (allPos.size === 0) continue;
+
+    // Skip positions that contain open strings
+    const hasOpen = [...allPos.keys()].some(k => k.split(',')[1] === '0');
+    if (hasOpen) continue;
 
     const dispMin = winMin;        // diagram starts at the first search fret
     const dispMax = winMax + 1;    // 1 fret of right padding
@@ -2060,11 +2066,15 @@ function syncViewUI() {
     btnDraw.classList.toggle('draw-scale-active', state.scaleDrawn);
     btnDraw.textContent = state.scaleDrawn ? 'Hide Scale' : 'Draw Scale';
   }
+  const btnScaleTab = document.getElementById('btn-scale-tab');
+  if (btnScaleTab) btnScaleTab.style.display = (isScale && state.scaleDrawn) ? '' : 'none';
   const btnTriad = document.getElementById('btn-draw-triads');
   if (btnTriad) {
     btnTriad.classList.toggle('draw-triad-active', state.triadDrawn);
     btnTriad.textContent = state.triadDrawn ? 'Hide Triads' : 'Open Triads';
   }
+  const btnTriadTab = document.getElementById('btn-triad-tab');
+  if (btnTriadTab) btnTriadTab.style.display = (isScale && state.triadDrawn) ? '' : 'none';
   const btnPair = document.getElementById('btn-draw-triads-pair');
   if (btnPair) {
     btnPair.classList.toggle('draw-triad-pair-active', state.triadPairDrawn);
@@ -2319,6 +2329,8 @@ document.getElementById('tp2-qual-select').addEventListener('change', e => {
   if (state.triadPairDrawn) refresh(); else syncViewUI();
 });
 
+document.getElementById('btn-scale-tab').addEventListener('click', generateScaleTab);
+document.getElementById('btn-triad-tab').addEventListener('click', generateTriadTab);
 document.getElementById('btn-tp-tab').addEventListener('click', generateTriadPairTab);
 
 document.getElementById('scale-key-select').addEventListener('change', e => {
@@ -2575,6 +2587,115 @@ document.getElementById('btn-stop').addEventListener('click', stopPlayback);
   });
 });
 
+// ─── Shared tab generation helpers ───────────────────────────────────────────
+
+/** Build a Map<pitch, [{s,f}]> from an array of {s,f,pitch} note objects. */
+function buildPitchMap(notes) {
+  const m = new Map();
+  for (const n of notes) {
+    if (!m.has(n.pitch)) m.set(n.pitch, []);
+    m.get(n.pitch).push(n);
+  }
+  return m;
+}
+
+/**
+ * Pick one note per pitch value, choosing the string option nearest to prevS
+ * to avoid string skips.
+ */
+function smoothPick(pitches, pitchMap, prevS) {
+  const result = [];
+  let curS = prevS;
+  for (const pitch of pitches) {
+    const opts = pitchMap.get(pitch);
+    if (!opts || !opts.length) continue;
+    const pick = curS == null
+      ? opts[0]
+      : opts.reduce((b, n) => Math.abs(n.s - curS) < Math.abs(b.s - curS) ? n : b);
+    result.push(pick);
+    curS = pick.s;
+  }
+  return result;
+}
+
+/** Extract {s,f,pitch} notes from a diagram's allPos map, sorted ascending. */
+function notesFromAllPos(allPos) {
+  return [...allPos.keys()].map(key => {
+    const [s, f] = key.split(',').map(Number);
+    return { s, f, pitch: OPEN_MIDI[s] + f };
+  }).sort((a, b) => a.pitch - b.pitch);
+}
+
+// ─── Scale Tab Generator ──────────────────────────────────────────────────────
+
+function generateScaleTab() {
+  const positions = computeScalePositions();
+  if (!positions.length) return;
+
+  const cols = [];
+  for (let pi = 0; pi < positions.length; pi++) {
+    if (pi > 0) cols.push({ _sysbreak: true });
+
+    const notes    = notesFromAllPos(positions[pi].allPos);
+    const pitchMap = buildPitchMap(notes);
+    const pitches  = [...pitchMap.keys()].sort((a, b) => a - b);
+    const picked   = smoothPick(pitches, pitchMap, null);
+
+    for (const n of picked) {
+      const col = { _dur: 'eighth', _pick: 'none' };
+      col[n.s] = n.f;
+      cols.push(col);
+    }
+  }
+
+  if (!cols.length) return;
+  state.columns    = cols;
+  state.currentCol = 0;
+  state.viewMode   = 'tab';
+  refresh();
+}
+
+// ─── Open Triad Tab Generator ─────────────────────────────────────────────────
+
+function generateTriadTab() {
+  const QUALS = ['major', 'minor'];
+  const INVS  = ['root', 'first', 'second'];
+
+  const cols = [];
+  let first = true;
+
+  for (const qual of QUALS) {
+    for (const inv of INVS) {
+      const shapes = computeOpenTriads(qual, inv);
+      if (!shapes.length) continue;
+
+      if (!first) cols.push({ _sysbreak: true });
+      first = false;
+
+      for (let si = 0; si < shapes.length; si++) {
+        if (si > 0) cols.push({ _barline: true });
+
+        const notes    = notesFromAllPos(shapes[si].allPos);
+        const pitchMap = buildPitchMap(notes);
+        const pitches  = [...pitchMap.keys()].sort((a, b) => a - b);
+        const picked   = smoothPick(pitches, pitchMap, null);
+
+        for (const n of picked) {
+          const col = { _dur: 'quarter', _pick: 'none' };
+          col[n.s] = n.f;
+          cols.push(col);
+        }
+      }
+    }
+  }
+
+  if (!cols.length) return;
+  state.columns    = cols;
+  state.currentCol = 0;
+  state.viewMode   = 'tab';
+  refresh();
+}
+
 // ─── Triad Pair Tab Generator ─────────────────────────────────────────────────
 
 function generateTriadPairTab() {
@@ -2589,34 +2710,6 @@ function generateTriadPairTab() {
   const t1 = triadPcs(r1, state.triadPair1Qual);
   const t2 = triadPcs(r2, state.triadPair2Qual);
   for (const pc of t1) if (t2.has(pc)) return; // invalid pair
-
-  // Build a Map<pitch, [{s,f}]> keeping ALL string options for each pitch level.
-  // "pitch" here is just a number used to order notes low→high (fret + open string offset).
-  function buildPitchMap(notes) {
-    const m = new Map();
-    for (const n of notes) {
-      if (!m.has(n.pitch)) m.set(n.pitch, []);
-      m.get(n.pitch).push(n);
-    }
-    return m;
-  }
-
-  // Pick notes from an ordered list of pitch values, choosing at each step the
-  // string option closest to the previous note's string (avoids string skips).
-  function smoothPick(pitches, pitchMap, prevS) {
-    const result = [];
-    let curS = prevS;
-    for (const pitch of pitches) {
-      const opts = pitchMap.get(pitch);
-      if (!opts || !opts.length) continue;
-      const pick = curS == null
-        ? opts[0]
-        : opts.reduce((b, n) => Math.abs(n.s - curS) < Math.abs(b.s - curS) ? n : b);
-      result.push(pick);
-      curS = pick.s;
-    }
-    return result;
-  }
 
   // Collect all valid positions (ascending anchor order)
   const positions = [];
